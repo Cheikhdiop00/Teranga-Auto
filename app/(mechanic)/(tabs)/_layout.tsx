@@ -8,6 +8,16 @@ export default function MechanicTabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: '#34C759',
         tabBarInactiveTintColor: '#8E8E93',
+        tabBarStyle: {
+          backgroundColor: '#0A1F44',
+          borderTopWidth: 0,
+          paddingBottom: 5,
+          height: 60,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          marginBottom: 5,
+        },
       }}
     >
       <Tabs.Screen
