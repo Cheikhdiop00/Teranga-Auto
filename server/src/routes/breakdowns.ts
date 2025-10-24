@@ -2,6 +2,9 @@ import { Router } from 'express';
 import Breakdown from '../models/Breakdown.js';
 import { buildCrudRouter } from '../utils/crud.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import Client from '../models/Client.js';
+import User from '../models/User.js';
+import { distanceKm } from '../utils/geo.js';
 
 const router = Router();
 
@@ -14,6 +17,71 @@ const router = Router();
 
 // CRUD de base
 router.use('/', buildCrudRouter(Breakdown, 'Breakdown'));
+
+/**
+ * @openapi
+ * /api/breakdowns/nearby:
+ *   get:
+ *     tags: [Breakdowns]
+ *     summary: Lister les pannes ouvertes proches d'une position
+ *     parameters:
+ *       - in: query
+ *         name: lat
+ *         required: true
+ *         schema: { type: number }
+ *       - in: query
+ *         name: lng
+ *         required: true
+ *         schema: { type: number }
+ *       - in: query
+ *         name: radiusKm
+ *         required: false
+ *         schema: { type: number, default: 20 }
+ */
+router.get(
+  '/nearby',
+  asyncHandler(async (req, res) => {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const radiusKm = req.query.radiusKm ? Number(req.query.radiusKm) : 20;
+    if (Number.isNaN(lat) || Number.isNaN(lng)) {
+      return res.status(400).json({ message: 'lat & lng are required numeric query params' });
+    }
+
+    // Récupérer pannes ouvertes avec coordonnées
+    const breakdowns = await Breakdown.find({ status: 'open', latitude: { $ne: null }, longitude: { $ne: null } })
+      .lean();
+
+    // Enrichir avec client et user
+    const result: any[] = [];
+    for (const b of breakdowns) {
+      const d = distanceKm({ lat, lng }, { lat: b.latitude, lng: b.longitude });
+      if (d > radiusKm) continue;
+      let clientName = 'Client';
+      try {
+        const client = b.client ? await Client.findById(b.client).lean() : null;
+        const user = client?.user ? await User.findById(client.user).lean() : null;
+        if (user) clientName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || clientName;
+      } catch {}
+      const estimatedDurationMin = Math.max(2, Math.round((d / 30) * 60)); // ~30km/h par défaut
+      result.push({
+        id: String(b._id),
+        clientName,
+        description: b.description,
+        latitude: b.latitude,
+        longitude: b.longitude,
+        distanceKm: Number(d.toFixed(2)),
+        estimatedDurationMin,
+        reportedAt: b.reportedAt,
+        status: b.status,
+      });
+    }
+
+    // Trier par distance
+    result.sort((a, b) => a.distanceKm - b.distanceKm);
+    res.json({ count: result.length, data: result });
+  })
+);
 
 /**
  * @openapi

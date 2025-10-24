@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/config/api';
 import { SwipeableRow } from '../../../components/SwipeableRow';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Types
 type Conversation = {
@@ -87,6 +88,8 @@ export default function MechanicMessagesScreen() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const { profile } = useAuth();
+  const currentUserId = (profile as any)?._id || (profile as any)?.id;
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -127,6 +130,11 @@ export default function MechanicMessagesScreen() {
         };
       });
       setConversations(convs);
+      // Auto-ouvrir la première conversation si disponible
+      if (convs.length > 0) {
+        setSelectedConversation(convs[0]);
+        await loadMessages(convs[0].id);
+      }
     } catch {
       setConversations([]);
     } finally {
@@ -138,12 +146,39 @@ export default function MechanicMessagesScreen() {
     loadConversations();
   }, []);
 
-  // Messages factices pour la conversation sélectionnée
-  const [messages, setMessages] = useState<Message[]>([
-    { id: '1', text: 'Bonjour, pourriez-vous me donner un devis ?', isMe: false, time: '10:30' },
-    { id: '2', text: 'Bien sûr, de quel type de réparation avez-vous besoin ?', isMe: true, time: '10:32' },
-    { id: '3', text: 'J\'ai un problème de freins qui grincent.', isMe: false, time: '10:33' },
-  ]);
+  // Chargement des messages de la conversation sélectionnée
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  const loadMessages = async (conversationId: string) => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const res = await fetch(`${API_URL}/api/messages/conversations/${conversationId}/messages`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) throw new Error('Failed to load messages');
+      const data = await res.json();
+      const msgs: Message[] = (data.data || []).map((m: any) => ({
+        id: m._id || m.id,
+        text: m.content || '',
+        isMe: currentUserId ? String(m.sender) === String(currentUserId) : false,
+        time: formatTime(m.createdAt),
+      }));
+      setMessages(msgs);
+    } catch {
+      setMessages([]);
+    }
+  };
+
+  // Recharger les messages quand on sélectionne une conversation depuis la liste
+  useEffect(() => {
+    if (selectedConversation) {
+      loadMessages(selectedConversation.id);
+    }
+  }, [selectedConversation]);
 
   const handleDeleteMessage = (messageId: string) => {
     setMessages(prevMessages => prevMessages.filter(msg => msg.id !== messageId));
@@ -165,7 +200,7 @@ export default function MechanicMessagesScreen() {
   const renderConversationItem: ListRenderItem<Conversation> = ({ item }) => (
     <ConversationItem 
       item={item} 
-      onPress={() => router.push(`/(mechanic)/chat/${item.id}` as any)} 
+      onPress={() => setSelectedConversation(item)} 
     />
   );
 

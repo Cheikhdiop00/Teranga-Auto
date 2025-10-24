@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'expo-router';
-import { LogOut, User, Phone, MapPin, Mail } from 'lucide-react-native';
+import { LogOut, User, Phone, MapPin, Mail, Edit3 } from 'lucide-react-native';
 
 export default function ClientProfileScreen() {
   const { profile, signOut } = useAuth();
@@ -25,6 +25,9 @@ export default function ClientProfileScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Profil</Text>
+        <TouchableOpacity style={styles.editBtn} onPress={() => router.push('/edit-profile')}>
+          <Edit3 color="#007AFF" size={20} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.content}>
@@ -86,10 +89,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
+  },
+  editBtn: {
+    padding: 8,
   },
   content: {
     padding: 16,

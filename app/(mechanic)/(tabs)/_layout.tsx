@@ -6,7 +6,7 @@ export default function MechanicTabsLayout() {
   return (
     <>
       {/* Sous-couche bleu foncé en bas pour remplir l'espace sous la tab bar flottante */}
-      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 40, backgroundColor: '#0A1F44' }} />
+      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 80, backgroundColor: '#0A1F44' }} />
       <Tabs
       screenOptions={{
         headerShown: false,

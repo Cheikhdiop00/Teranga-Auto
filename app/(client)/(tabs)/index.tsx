@@ -203,7 +203,7 @@ export default function ClientHomeScreen() {
         </TouchableOpacity>
       <View style={styles.headerCenter}>
   <Text style={styles.logo}>TerangaAuto</Text>
-  <TouchableOpacity style={styles.locationPill} onPress={openMap} activeOpacity={0.8}>
+  <TouchableOpacity style={styles.location} onPress={openMap} activeOpacity={0.8}>
     <Text style={styles.locationPillText}>{locationText || 'Votre position'}</Text>
    
   </TouchableOpacity>

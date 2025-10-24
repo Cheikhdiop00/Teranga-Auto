@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Alert, Switch, useColorScheme } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Alert, Switch, useColorScheme, Linking } from 'react-native';
 import { useEffect } from 'react';
 import { Menu, Bell, MessageCircle, Search, MapPin } from 'lucide-react-native';
 import Sidebar from '@/components/Sidebar';
@@ -6,15 +6,78 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCollection } from '@/lib/supabase';
 import { Service } from '@/types/database';
+import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/config/api';
 
 export default function MechanicHomeScreen() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const colorScheme = useColorScheme();
   const [isDarkMode, setIsDarkMode] = useState(colorScheme === 'dark');
+  const [locationText, setLocationText] = useState<string>('');
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationGranted, setLocationGranted] = useState<boolean | null>(null);
 
   const toggleTheme = () => {
     setIsDarkMode(prev => !prev);
     // Ici, vous pouvez ajouter la logique pour sauvegarder la préférence de thème
+  };
+
+  const loadNearbyBreakdowns = async (lat: number, lng: number) => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const res = await fetch(`${API_URL}/api/breakdowns/nearby?lat=${lat}&lng=${lng}&radiusKm=20`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) throw new Error('Failed to load nearby breakdowns');
+      const data = await res.json();
+      setNearbyBreakdowns((data.data || []) as NearbyBreakdown[]);
+    } catch (e) {
+      setNearbyBreakdowns([]);
+    }
+  };
+
+  const openMap = async () => {
+    try {
+      if (coords) {
+        const url = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+        await Linking.openURL(url);
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const url = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+      await Linking.openURL(url);
+    } catch (e) {
+      Alert.alert('Localisation', "Impossible d'ouvrir la carte. Activez la localisation.");
+    }
+  };
+
+  const saveMechanicLocation = async ({ latitude, longitude, address }: { latitude: number; longitude: number; address?: string }) => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      // Récupérer la liste des mécaniciens et trouver celui lié à l'utilisateur courant
+      const listRes = await fetch(`${API_URL}/api/mechanics`, { headers });
+      if (!listRes.ok) return;
+      const mechanics = await listRes.json();
+      const currentUserId = (profile as any)?.id || (profile as any)?._id;
+      const me = Array.isArray(mechanics) ? mechanics.find((m: any) => String(m.user) === String(currentUserId)) : null;
+      if (!me || !me._id) return;
+
+      await fetch(`${API_URL}/api/mechanics/${me._id}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ latitude, longitude, ...(address ? { address } : {}) }),
+      });
+    } catch {
+      // silencieux
+    }
   };
 
   const toggleSidebar = () => {
@@ -24,10 +87,123 @@ export default function MechanicHomeScreen() {
   const [isAvailable, setIsAvailable] = useState(profile?.is_available || false);
   const [pendingServices, setPendingServices] = useState<Service[]>([]);
   const [activeService, setActiveService] = useState<Service | null>(null);
+  type NearbyBreakdown = {
+    id: string;
+    clientName: string;
+    description: string;
+    latitude: number;
+    longitude: number;
+    distanceKm: number;
+    estimatedDurationMin: number;
+    reportedAt?: string;
+    status: string;
+  };
+  const [nearbyBreakdowns, setNearbyBreakdowns] = useState<NearbyBreakdown[]>([]);
 
   useEffect(() => {
     loadServices();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          setLocationText('Localisation désactivée');
+          setLocationGranted(false);
+          return;
+        }
+        setLocationGranted(true);
+        let pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (!pos || !pos.coords) {
+          const last = await Location.getLastKnownPositionAsync();
+          if (last) pos = last as any;
+        }
+        if (pos && pos.coords) {
+          setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          // Afficher d'abord les coordonnées pour éviter le vide
+          const baseLabel = `${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`;
+          setLocationText(baseLabel);
+          // Reverse geocode non bloquant
+          try {
+            const places = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+            if (places && places.length > 0) {
+              const p = places[0];
+              const city = p.city || p.subregion || p.region || '';
+              const country = p.country || '';
+              const name = p.name || p.street || '';
+              const composed = [name, city, country].filter(Boolean).join(', ');
+              if (composed) setLocationText(composed);
+            }
+          } catch {}
+          await saveMechanicLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, address: undefined });
+          await loadNearbyBreakdowns(pos.coords.latitude, pos.coords.longitude);
+        } else {
+          setLocationText('Localisation indisponible');
+        }
+      } catch {
+        setLocationText('Localisation indisponible');
+      }
+    })();
+  }, []);
+
+  const refreshLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationText('Localisation désactivée');
+        setLocationGranted(false);
+        return;
+      }
+      setLocationGranted(true);
+      let pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      if (!pos || !pos.coords) {
+        const last = await Location.getLastKnownPositionAsync();
+        if (last) pos = last as any;
+      }
+      if (pos && pos.coords) {
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        const baseLabel = `${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`;
+        setLocationText(baseLabel);
+        try {
+          const places = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+          if (places && places.length > 0) {
+            const p = places[0];
+            const city = p.city || p.subregion || p.region || '';
+            const country = p.country || '';
+            const name = p.name || p.street || '';
+            const composed = [name, city, country].filter(Boolean).join(', ');
+            if (composed) setLocationText(composed);
+          }
+        } catch {}
+        await saveMechanicLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, address: undefined });
+        await loadNearbyBreakdowns(pos.coords.latitude, pos.coords.longitude);
+      } else {
+        setLocationText('Localisation indisponible');
+      }
+    } catch {
+      setLocationText('Localisation indisponible');
+    }
+  };
+
+  const ensureLocationEnabled = async () => {
+    const { status, canAskAgain } = await Location.getForegroundPermissionsAsync();
+    if (status === 'granted') {
+      await refreshLocation();
+      return;
+    }
+    const req = await Location.requestForegroundPermissionsAsync();
+    if (req.status === 'granted') {
+      setLocationGranted(true);
+      await refreshLocation();
+      return;
+    }
+    // Permission refusée définitivement: ouvrir les réglages
+    setLocationGranted(false);
+    try {
+      await Linking.openSettings();
+    } catch {}
+  };
 
   const loadServices = async () => {
     try {
@@ -98,8 +274,19 @@ export default function MechanicHomeScreen() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.logo}>TerangaAuto</Text>
-          <Text style={styles.subtitle}>Mécanicien</Text>
+          <Text style={styles.subtitle} onPress={openMap}>
+            {locationText || 'Mécanicien'}
+          </Text>
         </View>
+
+      {locationGranted === false && (
+        <View style={styles.locationPrompt}>
+          <Text style={styles.locationPromptText}>Activez votre localisation pour afficher votre adresse</Text>
+          <TouchableOpacity style={styles.locationPromptBtn} onPress={ensureLocationEnabled}>
+            <Text style={styles.locationPromptBtnText}>Activer la localisation</Text>
+          </TouchableOpacity>
+        </View>
+      )}
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerButton}>
             <Bell color="white" size={24} />
@@ -191,33 +378,26 @@ export default function MechanicHomeScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Demandes de service</Text>
-          {pendingServices.length === 0 ? (
+          {nearbyBreakdowns.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>Aucune demande en attente</Text>
+              <Text style={styles.emptyStateText}>Aucune demande à proximité</Text>
             </View>
           ) : (
-            pendingServices.map((service) => (
-              <View key={service.id} style={styles.serviceCard}>
+            nearbyBreakdowns.map((b) => (
+              <View key={b.id} style={styles.serviceCard}>
                 <View style={styles.serviceHeader}>
-                  <Text style={styles.serviceType}>{service.service_type}</Text>
-                  <Text style={styles.serviceDistance}>
-                    {service.distance_km?.toFixed(1)} km
-                  </Text>
+                  <Text style={styles.serviceType}>{b.description || 'Panne'}</Text>
+                  <Text style={styles.serviceDistance}>{b.distanceKm.toFixed(1)} km • {b.estimatedDurationMin} min</Text>
                 </View>
-                <Text style={styles.serviceDescription}>
-                  {service.description}
-                </Text>
+                <Text style={styles.serviceDescription}>Client: {b.clientName}</Text>
                 <View style={styles.serviceLocation}>
                   <MapPin color="#666" size={16} />
                   <Text style={styles.serviceLocationText}>
-                    {service.location_address}
+                    {b.latitude.toFixed(4)}, {b.longitude.toFixed(4)}
                   </Text>
                 </View>
                 <View style={styles.serviceActions}>
-                  <TouchableOpacity
-                    style={styles.acceptButton}
-                    onPress={() => handleAcceptService(service.id)}
-                  >
+                  <TouchableOpacity style={styles.acceptButton}>
                     <Text style={styles.acceptButtonText}>Accepter</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.declineButton}>
@@ -271,6 +451,32 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  locationPrompt: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FED7AA',
+    borderWidth: 1,
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 10,
+  },
+  locationPromptText: {
+    color: '#7C2D12',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  locationPromptBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#0A1F44',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  locationPromptBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   adBanner: {
     backgroundColor: '#0A1F44',
