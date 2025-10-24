@@ -4,7 +4,7 @@ import { Menu, Bell, MessageCircle, Search, MapPin } from 'lucide-react-native';
 import Sidebar from '@/components/Sidebar';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { getCollection } from '@/lib/supabase';
 import { Service } from '@/types/database';
 
 export default function MechanicHomeScreen() {
@@ -31,22 +31,21 @@ export default function MechanicHomeScreen() {
 
   const loadServices = async () => {
     try {
-      const { data: pending } = await supabase
-        .from('services')
-        .select('*')
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(5);
+      const servicesCollection = await getCollection('services');
+      
+      const pending = await servicesCollection
+        .find({ status: 'pending' })
+        .sort({ created_at: -1 })
+        .limit(5)
+        .toArray();
 
-      const { data: active } = await supabase
-        .from('services')
-        .select('*')
-        .eq('mechanic_id', profile?.id)
-        .in('status', ['accepted', 'in_progress'])
-        .maybeSingle();
+      const active = await servicesCollection.findOne({
+        mechanic_id: profile?.id,
+        status: { $in: ['accepted', 'in_progress'] }
+      });
 
-      setPendingServices(pending || []);
-      setActiveService(active);
+      setPendingServices(pending as Service[]);
+      setActiveService(active as Service | null);
     } catch (error) {
       console.error('Error loading services:', error);
     }
@@ -63,16 +62,17 @@ export default function MechanicHomeScreen() {
 
   const handleAcceptService = async (serviceId: string) => {
     try {
-      const { error } = await supabase
-        .from('services')
-        .update({
-          mechanic_id: profile?.id,
-          status: 'accepted',
-          accepted_at: new Date().toISOString(),
-        })
-        .eq('id', serviceId);
-
-      if (error) throw error;
+      const servicesCollection = await getCollection('services');
+      await servicesCollection.updateOne(
+        { _id: serviceId },
+        {
+          $set: {
+            mechanic_id: profile?.id,
+            status: 'accepted',
+            accepted_at: new Date().toISOString(),
+          }
+        }
+      );
 
       Alert.alert('Succès', 'Service accepté');
       loadServices();

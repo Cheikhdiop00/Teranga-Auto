@@ -14,26 +14,102 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import LogoIcon from '@/assets/images/icon.png';
+import { Eye, EyeOff } from 'lucide-react-native';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const { signIn, signInWithGoogle } = useAuth();
   const router = useRouter();
 
+  // Validation de l'email
+  const validateEmail = (email: string): boolean => {
+    if (!email) {
+      setEmailError('L\'email est requis');
+      return false;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setEmailError('Format d\'email invalide');
+      return false;
+    }
+    setEmailError('');
+    return true;
+  };
+
+  // Validation du mot de passe
+  const validatePassword = (password: string): boolean => {
+    if (!password) {
+      setPasswordError('Le mot de passe est requis');
+      return false;
+    }
+    if (password.length < 6) {
+      setPasswordError('Le mot de passe doit contenir au moins 6 caractères');
+      return false;
+    }
+    setPasswordError('');
+    return true;
+  };
+
+  // Gérer le changement d'email
+  const handleEmailChange = (text: string) => {
+    setEmail(text);
+    // Réinitialiser l'erreur d'email dès que l'utilisateur tape
+    if (emailError) {
+      setEmailError('');
+    }
+  };
+
+  // Gérer le changement de mot de passe
+  const handlePasswordChange = (text: string) => {
+    setPassword(text);
+    // Réinitialiser l'erreur de mot de passe dès que l'utilisateur tape
+    if (passwordError) {
+      setPasswordError('');
+    }
+  };
+
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Erreur', 'Veuillez remplir tous les champs');
+    // Réinitialiser les erreurs
+    setEmailError('');
+    setPasswordError('');
+
+    // Valider tous les champs
+    const isEmailValid = validateEmail(email);
+    const isPasswordValid = validatePassword(password);
+
+    if (!isEmailValid || !isPasswordValid) {
       return;
     }
 
     setLoading(true);
     try {
       await signIn(email, password);
+      // Connexion réussie, rediriger vers l'index qui va router vers le bon dashboard
+      router.replace('/');
     } catch (error: any) {
-      Alert.alert('Erreur', error.message || 'Erreur de connexion');
+      // Analyser le message d'erreur pour déterminer quel champ est incorrect
+      const errorMessage = error.message || 'Erreur de connexion';
+      
+      if (errorMessage.toLowerCase().includes('email') || errorMessage.toLowerCase().includes('utilisateur') || errorMessage.toLowerCase().includes('compte non trouvé')) {
+        setEmailError('Email non trouvé ou incorrect');
+      } else if (errorMessage.toLowerCase().includes('mot de passe') || errorMessage.toLowerCase().includes('password')) {
+        setPasswordError('Mot de passe incorrect');
+      } else if (errorMessage.toLowerCase().includes('identifiant')) {
+        // Pour "Identifiants invalides", afficher l'erreur sur le mot de passe
+        setPasswordError('Email ou mot de passe incorrect');
+      } else if (errorMessage.toLowerCase().includes('activ')) {
+        // Compte non activé
+        setEmailError('Compte non activé. Vérifiez votre email');
+      } else {
+        // Si on ne peut pas déterminer, afficher l'erreur sur le mot de passe
+        setPasswordError(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -66,24 +142,45 @@ export default function LoginScreen() {
         <View style={styles.form}>
           <Text style={styles.title}>Connexion</Text>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            editable={!loading}
-          />
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={[styles.input, emailError && styles.inputError]}
+              placeholder="Email"
+              value={email}
+              onChangeText={handleEmailChange}
+              onBlur={() => validateEmail(email)}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              editable={!loading}
+            />
+            {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
+          </View>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Mot de passe"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            editable={!loading}
-          />
+          <View style={styles.inputContainer}>
+            <View style={styles.passwordInputWrapper}>
+              <TextInput
+                style={[styles.input, styles.passwordInput, passwordError && styles.inputError]}
+                placeholder="Mot de passe"
+                value={password}
+                onChangeText={handlePasswordChange}
+                onBlur={() => validatePassword(password)}
+                secureTextEntry={!showPassword}
+                editable={!loading}
+              />
+              <TouchableOpacity
+                style={styles.eyeIcon}
+                onPress={() => setShowPassword(!showPassword)}
+                disabled={loading}
+              >
+                {showPassword ? (
+                  <EyeOff size={20} color="#666666" />
+                ) : (
+                  <Eye size={20} color="#666666" />
+                )}
+              </TouchableOpacity>
+            </View>
+            {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+          </View>
 
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
@@ -145,6 +242,23 @@ const styles = StyleSheet.create({
   form: {
     width: '100%',
   },
+  inputContainer: {
+    marginBottom: 16,
+  },
+  passwordInputWrapper: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  passwordInput: {
+    flex: 1,
+    paddingRight: 50,
+  },
+  eyeIcon: {
+    position: 'absolute',
+    right: 16,
+    padding: 8,
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -156,8 +270,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
     borderRadius: 8,
     padding: 16,
-    marginBottom: 16,
     fontSize: 16,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#FFF5F5',
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
   },
   button: {
     backgroundColor: '#0A1F44',

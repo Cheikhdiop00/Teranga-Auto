@@ -1,11 +1,17 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { Session, User } from '@supabase/supabase-js';
 import { Linking } from 'react-native';
-import { supabase } from '@/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getCollection } from '@/lib/supabase';
 import { Profile, UserType } from '@/types/database';
+import { API_BASE_URL } from '@/config/api';
+
+interface User {
+  id: string;
+  email: string;
+}
 
 interface AuthContextType {
-  session: Session | null;
+  session: { userId: string } | null;
   user: User | null;
   profile: Profile | null;
   loading: boolean;
@@ -54,7 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const useMockAuth = process.env.EXPO_PUBLIC_USE_MOCK_AUTH === 'true';
   const mockUserType = (process.env.EXPO_PUBLIC_MOCK_USER_TYPE as UserType) || 'client';
   const mockProfile = buildMockProfile(mockUserType);
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<{ userId: string } | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(
     useMockAuth ? mockProfile : null,
@@ -65,45 +71,69 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (useMockAuth) {
       return;
     }
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        loadProfile(session.user.id);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        loadProfile(session.user.id);
-      } else {
-        setProfile(null);
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    // Vérifier si l'utilisateur est connecté au démarrage
+    checkAuth();
   }, [useMockAuth]);
 
-  const loadProfile = async (userId: string) => {
+  const checkAuth = async () => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const userId = await AsyncStorage.getItem('userId');
+      const userEmail = await AsyncStorage.getItem('userEmail');
+      
+      if (token && userId) {
+        setSession({ userId });
+        setUser({ id: userId, email: userEmail || '' });
+        loadProfile(userId);
+      } else {
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error('Error checking auth:', error);
+      setLoading(false);
+    }
+  };
+
+  const loadProfile = async (_userId: string) => {
     if (useMockAuth) {
       setProfile(mockProfile);
       setLoading(false);
       return;
     }
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (error) throw error;
-      setProfile(data);
+      const token = await AsyncStorage.getItem('authToken');
+      const res = await fetch(`${API_BASE_URL}/auth/me`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Échec chargement profil' }));
+        throw new Error(err.message || 'Échec chargement profil');
+      }
+      const user = await res.json();
+      const mapped: Profile = {
+        id: user._id || user.id,
+        user_type: user.role === 'ADMIN' ? 'admin' : user.role === 'CLIENT' ? 'client' : 'mechanic',
+        first_name: user.firstName || '',
+        last_name: user.lastName || '',
+        phone: user.phoneNumber || '',
+        address: '',
+        photo_url: user.profilePhoto,
+        id_card_number: undefined,
+        specialties: undefined,
+        is_available: true,
+        rating_average: 0,
+        rating_count: 0,
+        latitude: 0,
+        longitude: 0,
+        is_blocked: user.status === 'inactive',
+        created_at: user.createdAt || new Date().toISOString(),
+        updated_at: user.updatedAt || new Date().toISOString(),
+      };
+      setProfile(mapped);
     } catch (error) {
       console.error('Error loading profile:', error);
     } finally {
@@ -117,11 +147,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       return;
     }
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    // Appel API à votre backend pour l'authentification
+    const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
     });
-    if (error) throw error;
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Échec de la connexion' }));
+      throw new Error(error.message || 'Échec de la connexion');
+    }
+    
+    const data = await response.json();
+    const userId = data.user._id || data.user.id;
+    
+    await AsyncStorage.setItem('authToken', data.token);
+    await AsyncStorage.setItem('userId', userId);
+    await AsyncStorage.setItem('userEmail', email);
+    
+    setSession({ userId });
+    setUser({ id: userId, email });
+    
+    // Utiliser directement les données de l'utilisateur pour créer un profil temporaire
+    // En attendant d'implémenter un endpoint dédié pour récupérer le profil complet
+    const tempProfile: Profile = {
+      id: userId,
+      user_type: data.user.role === 'ADMIN' ? 'admin' : data.user.role === 'CLIENT' ? 'client' : 'mechanic',
+      first_name: data.user.firstName || '',
+      last_name: data.user.lastName || '',
+      phone: data.user.phoneNumber || '',
+      address: '',
+      photo_url: data.user.profilePhoto,
+      id_card_number: undefined,
+      specialties: undefined,
+      is_available: true,
+      rating_average: 0,
+      rating_count: 0,
+      latitude: 0,
+      longitude: 0,
+      is_blocked: false,
+      created_at: data.user.createdAt || new Date().toISOString(),
+      updated_at: data.user.updatedAt || new Date().toISOString(),
+    };
+    
+    setProfile(tempProfile);
+    setLoading(false);
   };
 
   const signInWithGoogle = async () => {
@@ -130,21 +201,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       return;
     }
-
-    const redirectTo = process.env.EXPO_PUBLIC_SUPABASE_REDIRECT_URL;
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: redirectTo || undefined,
-        skipBrowserRedirect: false,
-      },
-    });
-
-    if (error) throw error;
-
-    if (data?.url) {
-      await Linking.openURL(data.url);
-    }
+    // Implémentation de l'authentification Google avec votre backend
+    throw new Error('Authentification Google non implémentée');
   };
 
   const signUp = async (
@@ -173,27 +231,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       return;
     }
-    const { data, error } = await supabase.auth.signUp({
+    
+    // Appel API à votre backend pour l'inscription
+    // Mapper les champs du mobile vers l'API serveur
+    const payload = {
       email,
       password,
-    });
-
-    if (error) throw error;
-    if (!data.user) throw new Error('Erreur lors de la création du compte');
-
-    const { error: profileError } = await supabase.from('profiles').insert({
-      id: data.user.id,
-      user_type: userData.userType,
-      first_name: userData.firstName,
-      last_name: userData.lastName,
-      phone: userData.phone,
+      firstName: userData.firstName,
+      lastName: userData.lastName,
+      phoneNumber: userData.phone,
       address: userData.address,
-      specialties: userData.specialties,
-      id_card_number: userData.idCardNumber,
-      is_available: userData.userType === 'mechanic' ? false : undefined,
-    });
+      nationalId: userData.idCardNumber,
+      role: userData.userType === 'mechanic' ? 'MECANICIEN' : 'CLIENT',
+    } as const;
 
-    if (profileError) throw profileError;
+    const response = await fetch(`${API_BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: "Échec de l'inscription" }));
+      throw new Error(error.message || "Échec de l'inscription");
+    }
+    
+    const data = await response.json();
+    const createdUserId = data?.user?._id || data?.user?.id;
+    if (data?.token) {
+      await AsyncStorage.setItem('authToken', data.token);
+    }
+    if (createdUserId) {
+      await AsyncStorage.setItem('userId', createdUserId);
+    }
+    await AsyncStorage.setItem('userEmail', email);
   };
 
   const signOut = async () => {
@@ -202,8 +273,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       return;
     }
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    await AsyncStorage.removeItem('authToken');
+    await AsyncStorage.removeItem('userId');
+    await AsyncStorage.removeItem('userEmail');
+    setSession(null);
+    setUser(null);
+    setProfile(null);
   };
 
   const updateProfile = async (updates: Partial<Profile>) => {
@@ -221,14 +296,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     if (!user) throw new Error('Non authentifié');
 
-    const { error } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('id', user.id);
-
-    if (error) throw error;
-
-    await loadProfile(user.id);
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const body: any = {
+        firstName: updates.first_name,
+        lastName: updates.last_name,
+        phoneNumber: updates.phone,
+        profilePhoto: updates.photo_url,
+      };
+      const res = await fetch(`${API_BASE_URL}/auth/profile`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Échec mise à jour profil' }));
+        throw new Error(err.message || 'Échec mise à jour profil');
+      }
+      await loadProfile(user.id);
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      throw error;
+    }
   };
 
   return (

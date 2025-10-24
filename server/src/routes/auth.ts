@@ -109,7 +109,13 @@ const router = Router();
 router.post(
   '/register',
   asyncHandler(async (req, res) => {
-    const { email, password, firstName, lastName, phoneNumber, role, nationalId, address, profilePhoto } = req.body;
+    const { email, password, firstName, lastName, nationalId, address, profilePhoto } = req.body;
+    // Support both phone and phoneNumber, and normalize role to uppercase
+    const phoneNumber = req.body.phoneNumber || req.body.phone;
+    const roleRaw = (req.body.role || '').toString();
+    const role = roleRaw.toUpperCase();
+
+    console.log('Register payload:', { email, firstName, lastName, phoneNumber, role, address, hasPassword: !!password });
 
     // Vérifier que le rôle est valide (CLIENT ou MECANICIEN)
     if (!['CLIENT', 'MECANICIEN'].includes(role)) {

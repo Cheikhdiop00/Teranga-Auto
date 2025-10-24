@@ -11,6 +11,7 @@ import {
   Easing,
   FlatList,
 } from 'react-native';
+import * as Location from 'expo-location';
 import {
   Menu,
   Bell,
@@ -25,7 +26,7 @@ import {
   Shield,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/lib/supabase';
 import { Profile } from '@/types/database';
 
 const MECHANIC_TYPES = [
@@ -45,6 +46,7 @@ export default function ClientHomeScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const servicesAnimation = useRef(new Animated.Value(0)).current;
+  const [locationText, setLocationText] = useState<string>('');
 
   useEffect(() => {
     loadMechanics();
@@ -59,24 +61,62 @@ export default function ClientHomeScreen() {
     }).start();
   }, [servicesAnimation]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          setLocationText('Localisation désactivée');
+          return;
+        }
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const places = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+        if (places && places.length > 0) {
+          const p = places[0];
+          const city = p.city || p.subregion || p.region || '';
+          const country = p.country || '';
+          const label = [city, country].filter(Boolean).join(', ');
+          setLocationText(label || `${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`);
+        } else {
+          setLocationText(`${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`);
+        }
+      } catch {
+        setLocationText('Localisation indisponible');
+      }
+    })();
+  }, []);
+
   const loadMechanics = async () => {
     try {
-      let query = supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_type', 'mechanic')
-        .eq('is_available', true)
-        .eq('is_blocked', false)
-        .order('rating_average', { ascending: false });
+      const list = await api.mechanics.list();
+      // list is an array of mechanics documents (server model). Map to Profile shape.
+      let mapped: Profile[] = (Array.isArray(list) ? list : []).map((m: any) => ({
+        id: m._id || m.id,
+        user_type: 'mechanic',
+        first_name: m.user?.firstName || m.firstName || 'Mécano',
+        last_name: m.user?.lastName || m.lastName || '',
+        phone: m.user?.phoneNumber || m.phoneNumber || '',
+        address: m.address || '',
+        photo_url: m.user?.profilePhoto || undefined,
+        id_card_number: m.nationalId,
+        specialties: m.specialties || [],
+        is_available: m.is_available ?? true,
+        rating_average: m.rating_average ?? 0,
+        rating_count: m.rating_count ?? 0,
+        latitude: m.latitude ?? 0,
+        longitude: m.longitude ?? 0,
+        is_blocked: false,
+        created_at: m.createdAt || new Date().toISOString(),
+        updated_at: m.updatedAt || new Date().toISOString(),
+      }));
 
       if (selectedType) {
-        query = query.contains('specialties', [selectedType]);
+        mapped = mapped.filter((p) => (p.specialties || []).includes(selectedType));
       }
 
-      const { data, error } = await query.limit(10);
-
-      if (error) throw error;
-      setMechanics(data || []);
+      // Top 10 by rating
+      mapped.sort((a, b) => (b.rating_average || 0) - (a.rating_average || 0));
+      setMechanics(mapped.slice(0, 10));
     } catch (error) {
       console.error('Error loading mechanics:', error);
     } finally {
@@ -103,7 +143,7 @@ export default function ClientHomeScreen() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.logo}>TerangaAuto</Text>
-          <Text style={styles.location}>Dakar, Sénégal</Text>
+          <Text style={styles.location}>{locationText || 'Localisation...'}</Text>
         </View>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerButton}>

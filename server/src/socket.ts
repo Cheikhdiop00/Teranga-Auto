@@ -6,6 +6,8 @@ import Message from './models/Message.js';
 import Conversation from './models/Conversation.js';
 
 let io: Server;
+// Map userId -> connection count
+const onlineUsers = new Map<string, number>();
 
 export const initSocket = (app: any) => {
   const server = createServer(app);
@@ -30,6 +32,14 @@ export const initSocket = (app: any) => {
   }).on('connection', (socket: any) => {
     console.log('Nouvelle connexion:', socket.user.id);
     socket.join(`user_${socket.user.id}`);
+
+    // Presence: increment and notify
+    const uid = String(socket.user.id);
+    const count = (onlineUsers.get(uid) || 0) + 1;
+    onlineUsers.set(uid, count);
+    if (count === 1) {
+      io.emit('user_online', { userId: uid });
+    }
 
     // Gestion des messages
     socket.on('send_message', async (data: any) => {
@@ -138,7 +148,22 @@ export const initSocket = (app: any) => {
       });
     });
 
+    // Presence query
+    socket.on('get_presence', (payload: { userId: string }) => {
+      const online = (onlineUsers.get(String(payload?.userId)) || 0) > 0;
+      socket.emit('presence', { userId: String(payload?.userId), online });
+    });
+
     socket.on('disconnect', () => {
+      const uid = String(socket.user?.id);
+      const prev = onlineUsers.get(uid) || 0;
+      const next = Math.max(prev - 1, 0);
+      if (next === 0) {
+        onlineUsers.delete(uid);
+        io.emit('user_offline', { userId: uid });
+      } else {
+        onlineUsers.set(uid, next);
+      }
       console.log('Déconnecté:', socket.user?.id);
     });
   });

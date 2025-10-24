@@ -1,11 +1,12 @@
 import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, ScrollView, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'expo-router';
 import { LogOut, User, Phone, MapPin, Wrench, Star, Mail, Lock, Camera } from 'lucide-react-native';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { getCollection } from '@/lib/supabase';
 
 export default function MechanicProfileScreen() {
   const { profile, signOut, updateProfile, user } = useAuth();
@@ -106,25 +107,22 @@ export default function MechanicProfileScreen() {
 
       // Mise à jour du mot de passe si fourni
       if (formData.newPassword && formData.currentPassword) {
-        // D'abord, on se réauthentifie avec l'ancien mot de passe
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: user?.email || '',
-          password: formData.currentPassword,
+        // Appel API pour mettre à jour le mot de passe
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/update-password`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${await AsyncStorage.getItem('authToken')}`
+          },
+          body: JSON.stringify({
+            currentPassword: formData.currentPassword,
+            newPassword: formData.newPassword
+          }),
         });
         
-        if (signInError) {
-          if (signInError.message.includes('Invalid login')) {
-            throw new Error('Le mot de passe actuel est incorrect');
-          }
-          throw signInError;
+        if (!response.ok) {
+          throw new Error('Le mot de passe actuel est incorrect');
         }
-        
-        // Ensuite, on met à jour le mot de passe
-        const { error: updateError } = await supabase.auth.updateUser({
-          password: formData.newPassword
-        });
-        
-        if (updateError) throw updateError;
       }
 
       // Mise à jour de la photo de profil si elle a changé
@@ -139,11 +137,20 @@ export default function MechanicProfileScreen() {
       
       // Mise à jour de l'email si nécessaire
       if (formData.email !== user?.email) {
-        const { error } = await supabase.auth.updateUser({
-          email: formData.email
+        // Appel API pour mettre à jour l'email
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/update-email`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${await AsyncStorage.getItem('authToken')}`
+          },
+          body: JSON.stringify({ email: formData.email }),
         });
         
-        if (error) throw error;
+        if (!response.ok) {
+          throw new Error('Impossible de mettre à jour l\'email');
+        }
+        await AsyncStorage.setItem('userEmail', formData.email);
       }
 
       setIsEditing(false);

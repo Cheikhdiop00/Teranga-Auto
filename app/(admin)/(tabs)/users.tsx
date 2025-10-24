@@ -8,7 +8,7 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/lib/supabase';
 import { Profile } from '@/types/database';
 import { Search, Ban, CheckCircle } from 'lucide-react-native';
 
@@ -23,20 +23,32 @@ export default function UsersScreen() {
 
   const loadUsers = async () => {
     try {
-      let query = supabase
-        .from('profiles')
-        .select('*')
-        .neq('user_type', 'admin')
-        .order('created_at', { ascending: false });
-
-      if (filter !== 'all') {
-        query = query.eq('user_type', filter);
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setUsers(data || []);
+      const res = await api.admin.users();
+      const all = (res.users || []) as any[];
+      const filtered = all.filter((u) => {
+        if (filter === 'all') return u.role !== 'ADMIN';
+        return filter === 'client' ? u.role === 'CLIENT' : u.role === 'MECANICIEN';
+      });
+      const mapped: Profile[] = filtered.map((u: any) => ({
+        id: u._id || u.id,
+        user_type: u.role === 'CLIENT' ? 'client' : 'mechanic',
+        first_name: u.firstName || '',
+        last_name: u.lastName || '',
+        phone: u.phoneNumber || '',
+        address: '',
+        photo_url: u.profilePhoto,
+        id_card_number: undefined,
+        specialties: undefined,
+        is_available: true,
+        rating_average: 0,
+        rating_count: 0,
+        latitude: 0,
+        longitude: 0,
+        is_blocked: u.status === 'inactive',
+        created_at: u.createdAt || new Date().toISOString(),
+        updated_at: u.updatedAt || new Date().toISOString(),
+      }));
+      setUsers(mapped);
     } catch (error) {
       console.error('Error loading users:', error);
     } finally {
@@ -46,12 +58,15 @@ export default function UsersScreen() {
 
   const toggleBlockUser = async (userId: string, isBlocked: boolean) => {
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ is_blocked: !isBlocked })
-        .eq('id', userId);
-
-      if (error) throw error;
+      const newStatus = isBlocked ? 'active' : 'inactive';
+      await fetch(`${process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.49:3000'}/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${await (await import('@react-native-async-storage/async-storage')).default.getItem('authToken')}`
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
 
       Alert.alert(
         'Succès',

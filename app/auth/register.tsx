@@ -13,7 +13,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserType, MECHANIC_SPECIALTIES } from '@/types/database';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Eye, EyeOff } from 'lucide-react-native';
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -31,6 +31,16 @@ export default function RegisterScreen() {
   const [loading, setLoading] = useState(false);
   const { signUp } = useAuth();
   const router = useRouter();
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
+  const [firstNameError, setFirstNameError] = useState('');
+  const [lastNameError, setLastNameError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [addressError, setAddressError] = useState('');
+  const [idCardError, setIdCardError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
     if (userType !== 'mechanic') {
@@ -41,28 +51,33 @@ export default function RegisterScreen() {
   }, [userType]);
 
   const handleRegister = async () => {
-    if (
-      !email ||
-      !password ||
-      !confirmPassword ||
-      !firstName ||
-      !lastName ||
-      !phone ||
-      !address
-    ) {
-      Alert.alert('Erreur', 'Veuillez remplir tous les champs');
-      return;
+    setEmailError('');
+    setPasswordError('');
+    setConfirmPasswordError('');
+    setFirstNameError('');
+    setLastNameError('');
+    setPhoneError('');
+    setAddressError('');
+    setIdCardError('');
+
+    let valid = true;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!firstName.trim()) { setFirstNameError('Le prénom est requis'); valid = false; }
+    if (!lastName.trim()) { setLastNameError('Le nom est requis'); valid = false; }
+    if (!phone.trim()) { setPhoneError('Le téléphone est requis'); valid = false; }
+    if (!address.trim()) { setAddressError('L\'adresse est requise'); valid = false; }
+    if (!email.trim()) { setEmailError('L\'email est requis'); valid = false; }
+    else if (!emailRegex.test(email)) { setEmailError('Format d\'email invalide'); valid = false; }
+    if (!password) { setPasswordError('Le mot de passe est requis'); valid = false; }
+    else if (password.length < 6) { setPasswordError('Au moins 6 caractères'); valid = false; }
+    if (!confirmPassword) { setConfirmPasswordError('La confirmation est requise'); valid = false; }
+    else if (password !== confirmPassword) { setConfirmPasswordError('Les mots de passe ne correspondent pas'); valid = false; }
+    if (userType === 'mechanic') {
+      if (!mechanicSpecialty) { setIdCardError('Sélectionnez une spécialité et un numéro'); valid = false; }
+      if (!idCardNumber.trim()) { setIdCardError('Le numéro d\'identité est requis'); valid = false; }
     }
 
-    if (password !== confirmPassword) {
-      Alert.alert('Erreur', 'Les mots de passe ne correspondent pas');
-      return;
-    }
-
-    if (userType === 'mechanic' && (!mechanicSpecialty || !idCardNumber)) {
-      Alert.alert('Erreur', 'Veuillez sélectionner une spécialité et saisir votre numéro d\'identité');
-      return;
-    }
+    if (!valid) return;
 
     setLoading(true);
     try {
@@ -218,58 +233,63 @@ export default function RegisterScreen() {
 
           <Text style={styles.inputLabel}>Prénom</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, firstNameError && styles.inputError]}
             placeholder="Saisissez votre prénom"
             value={firstName}
             onChangeText={setFirstName}
             editable={!loading}
           />
+          {firstNameError ? <Text style={styles.errorText}>{firstNameError}</Text> : null}
 
           <Text style={styles.inputLabel}>Nom</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, lastNameError && styles.inputError]}
             placeholder="Saisissez votre nom"
             value={lastName}
             onChangeText={setLastName}
             editable={!loading}
           />
+          {lastNameError ? <Text style={styles.errorText}>{lastNameError}</Text> : null}
 
           <Text style={styles.inputLabel}>Téléphone</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, phoneError && styles.inputError]}
             placeholder="Indiquez votre numéro de téléphone"
             value={phone}
             onChangeText={setPhone}
             keyboardType="phone-pad"
             editable={!loading}
           />
+          {phoneError ? <Text style={styles.errorText}>{phoneError}</Text> : null}
 
           <Text style={styles.inputLabel}>Adresse</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, addressError && styles.inputError]}
             placeholder="Renseignez votre adresse"
             value={address}
             onChangeText={setAddress}
             editable={!loading}
           />
+          {addressError ? <Text style={styles.errorText}>{addressError}</Text> : null}
 
           {userType === 'mechanic' && (
             <>
               <Text style={styles.inputLabel}>Numéro d'identité</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, idCardError && styles.inputError]}
                 placeholder="Saisissez votre numéro d'identité"
                 value={idCardNumber}
                 onChangeText={setIdCardNumber}
                 editable={!loading}
                 keyboardType="default"
               />
+              {idCardError ? <Text style={styles.errorText}>{idCardError}</Text> : null}
             </>
           )}
 
           <Text style={styles.inputLabel}>Email</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, emailError && styles.inputError]}
             placeholder="Entrez votre adresse email"
             value={email}
             onChangeText={setEmail}
@@ -277,26 +297,47 @@ export default function RegisterScreen() {
             keyboardType="email-address"
             editable={!loading}
           />
+          {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
 
           <Text style={styles.inputLabel}>Mot de passe</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Créez un mot de passe"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            editable={!loading}
-          />
+          <View style={styles.passwordInputWrapper}>
+            <TextInput
+              style={[styles.input, styles.passwordInput, passwordError && styles.inputError]}
+              placeholder="Créez un mot de passe"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              editable={!loading}
+            />
+            <TouchableOpacity
+              style={styles.eyeIcon}
+              onPress={() => setShowPassword((p) => !p)}
+              disabled={loading}
+            >
+              {showPassword ? <EyeOff size={20} color="#666666" /> : <Eye size={20} color="#666666" />}
+            </TouchableOpacity>
+          </View>
+          {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
 
           <Text style={styles.inputLabel}>Confirmer le mot de passe</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Confirmez votre mot de passe"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-            editable={!loading}
-          />
+          <View style={styles.passwordInputWrapper}>
+            <TextInput
+              style={[styles.input, styles.passwordInput, confirmPasswordError && styles.inputError]}
+              placeholder="Confirmez votre mot de passe"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry={!showConfirmPassword}
+              editable={!loading}
+            />
+            <TouchableOpacity
+              style={styles.eyeIcon}
+              onPress={() => setShowConfirmPassword((p) => !p)}
+              disabled={loading}
+            >
+              {showConfirmPassword ? <EyeOff size={20} color="#666666" /> : <Eye size={20} color="#666666" />}
+            </TouchableOpacity>
+          </View>
+          {confirmPasswordError ? <Text style={styles.errorText}>{confirmPasswordError}</Text> : null}
 
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
@@ -432,6 +473,31 @@ const styles = StyleSheet.create({
     color: '#333333',
     height: 48,
     width: '100%',
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#FFF5F5',
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 12,
+    marginTop: -10,
+    marginBottom: 10,
+    marginLeft: 4,
+  },
+  passwordInputWrapper: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  passwordInput: {
+    flex: 1,
+    paddingRight: 50,
+  },
+  eyeIcon: {
+    position: 'absolute',
+    right: 16,
+    padding: 8,
   },
   button: {
     backgroundColor: '#0A1F44',

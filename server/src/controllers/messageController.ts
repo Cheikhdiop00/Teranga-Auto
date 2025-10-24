@@ -99,6 +99,9 @@ export const startConversation = asyncHandler(async (req: Request & { user: any 
     });
   }
 
+  // Récupérer les infos de l'expéditeur (pour répondre avec le nom correct)
+  const senderUser = await User.findById(userId).select('firstName lastName');
+
   // Vérifier si une conversation existe déjà
   let conversation = await Conversation.findOne({
     participants: { $all: [userId, participantId], $size: 2 },
@@ -152,8 +155,8 @@ export const startConversation = asyncHandler(async (req: Request & { user: any 
       ...initialMessage.toObject(),
       sender: {
         _id: userId,
-        firstName: req.user.firstName,
-        lastName: req.user.lastName
+        firstName: senderUser?.firstName,
+        lastName: senderUser?.lastName
       }
     } : null
   });

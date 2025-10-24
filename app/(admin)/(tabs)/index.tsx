@@ -25,12 +25,17 @@ import {
   ShieldCheck,
   Users,
   Wrench,
+  MessageCircle,
+  Crown,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { getCollection, api } from '@/lib/supabase';
+import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AdminDashboardScreen() {
-  const { profile, signOut } = useAuth();
+  const { profile, loading: authLoading, signOut } = useAuth();
+  const router = useRouter();
   const [stats, setStats] = useState({
     totalClients: 0,
     totalMechanics: 0,
@@ -39,6 +44,7 @@ export default function AdminDashboardScreen() {
   });
   const [loading, setLoading] = useState(true);
   const [recentServices, setRecentServices] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const menuProgress = useRef(new Animated.Value(0)).current;
@@ -51,23 +57,27 @@ export default function AdminDashboardScreen() {
   const theme = isDarkMode
     ? {
         background: '#121212',
-        headerBackground: '#1F1F1F',
+        headerBackground: '#0A1F44', // Bleu foncé pour le header
         borderColor: '#2C2C2E',
         textPrimary: '#FFFFFF',
         textSecondary: '#A0A0A0',
         cardBackground: '#1F1F1F',
         menuBackground: '#2C2C2E',
         iconColor: '#FFFFFF',
+        headerTextColor: '#FFFFFF',
+        headerIconColor: '#FFFFFF',
       }
     : {
         background: '#F5F5F5',
-        headerBackground: '#FFFFFF',
+        headerBackground: '#0A1F44', // Bleu foncé pour le header
         borderColor: '#E0E0E0',
         textPrimary: '#000000',
         textSecondary: '#666666',
         cardBackground: '#FFFFFF',
         menuBackground: '#FFFFFF',
         iconColor: '#000000',
+        headerTextColor: '#FFFFFF', // Texte blanc sur fond bleu
+        headerIconColor: '#FFFFFF', // Icônes blanches sur fond bleu
       };
 
   const handleToggleTheme = () => {
@@ -88,7 +98,8 @@ export default function AdminDashboardScreen() {
   const handleSignOut = async () => {
     setIsMenuOpen(false);
     try {
-      await signOut();
+      await AsyncStorage.removeItem('authToken');
+      signOut();
     } catch (error) {
       console.error('Error signing out:', error);
     }
@@ -104,43 +115,26 @@ export default function AdminDashboardScreen() {
   }, [isMenuOpen, menuProgress]);
 
   useEffect(() => {
-    loadStats();
-  }, []);
+    if (!authLoading && profile) {
+      loadStats();
+      loadUsers();
+    }
+  }, [authLoading, profile]);
 
   const loadStats = async () => {
     try {
-      const [clientsRes, mechanicsRes, servicesRes, reportsRes, recentRes] =
-        await Promise.all([
-          supabase
-            .from('profiles')
-            .select('id', { count: 'exact', head: true })
-            .eq('user_type', 'client'),
-          supabase
-            .from('profiles')
-            .select('id', { count: 'exact', head: true })
-            .eq('user_type', 'mechanic'),
-          supabase
-            .from('services')
-            .select('id', { count: 'exact', head: true }),
-          supabase
-            .from('reports')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'pending'),
-          supabase
-            .from('services')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(5),
-        ]);
-
+      console.log('Loading stats for admin dashboard...');
+      const res = await api.admin.stats();
+      // res: { totalUsers, totalClients, totalMechanics, activeUsers }
       setStats({
-        totalClients: clientsRes.count || 0,
-        totalMechanics: mechanicsRes.count || 0,
-        totalServices: servicesRes.count || 0,
-        totalReports: reportsRes.count || 0,
+        totalClients: res.totalClients ?? 0,
+        totalMechanics: res.totalMechanics ?? 0,
+        totalServices: 0, // TODO: brancher quand l'endpoint services sera prêt
+        totalReports: 0,  // TODO: brancher quand l'endpoint reports sera prêt
       });
 
-      setRecentServices(recentRes.data || []);
+      setRecentServices([]); // TODO: charger les services récents quand l'API sera prête
+      console.log('Stats loaded successfully');
     } catch (error) {
       console.error('Error loading stats:', error);
     } finally {
@@ -148,192 +142,165 @@ export default function AdminDashboardScreen() {
     }
   };
 
+  const loadUsers = async () => {
+    try {
+      const res = await api.admin.users();
+      const list = (res.users || res.data || []) as any[];
+      setUsers(Array.isArray(list) ? list : []);
+    } catch (e) {
+      setUsers([]);
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <View
-        style={[styles.header, { backgroundColor: '#0A1F44', borderBottomColor: '#0A1F44' }]}
-      >
-        <TouchableOpacity
-          style={styles.headerButton}
-          onPress={() => setIsMenuOpen((prev) => !prev)}
-        >
-          <Menu color="#FFFFFF" size={24} />
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: theme.headerBackground, borderBottomColor: theme.borderColor }]}>
+        <TouchableOpacity onPress={() => setIsMenuOpen(true)} style={styles.menuButton}>
+          <Menu size={24} color={theme.headerIconColor} />
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={[styles.logo, { color: 'white' }]}>TerangaAuto</Text>
-          <Text style={[styles.subtitle, { color: 'white' }]}>Administration</Text>
+        <Text style={[styles.headerTitle, { color: theme.headerTextColor }]}>Teranga Auto</Text>
+        <View style={styles.headerIcons}>
+          <Bell size={24} color={theme.headerIconColor} />
         </View>
-        <TouchableOpacity style={styles.headerButton}>
-          <Bell color="#FFFFFF" size={24} />
-        </TouchableOpacity>
       </View>
 
+      {/* Bandeau Rôle Administrateur */}
+      <View style={[styles.roleBanner, { backgroundColor: theme.cardBackground, borderBottomColor: theme.borderColor }]}>
+        <View style={styles.roleContent}>
+          <Crown size={20} color="#FFD700" style={styles.crownIcon} />
+          <Text style={[styles.roleTitle, { color: theme.textPrimary }]}>Administrateur</Text>
+          <View style={styles.adminBadge}>
+            <ShieldCheck size={14} color="#FFFFFF" />
+            <Text style={styles.badgeText}>ADMIN</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Menu Drawer */}
       {isMenuOpen && (
         <TouchableWithoutFeedback onPress={() => setIsMenuOpen(false)}>
-          <Animated.View style={[styles.menuOverlay, { opacity: menuProgress }]} />
+          <View style={styles.overlay}>
+            <TouchableWithoutFeedback>
+              <Animated.View
+                style={[
+                  styles.drawer,
+                  { backgroundColor: theme.menuBackground, transform: [{ translateX: menuTranslate }], width: drawerWidth },
+                ]}
+              >
+                <View style={styles.drawerHeader}>
+                  <Text style={[styles.drawerTitle, { color: theme.textPrimary }]}>Menu Admin</Text>
+                </View>
+                <TouchableOpacity style={styles.drawerItem} onPress={handleToggleTheme}>
+                  <Moon size={20} color={theme.iconColor} />
+                  <Text style={[styles.drawerItemText, { color: theme.textPrimary }]}>
+                    {isDarkMode ? 'Mode clair' : 'Mode sombre'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.drawerItem} onPress={handleOpenDocs}>
+                  <Info size={20} color={theme.iconColor} />
+                  <Text style={[styles.drawerItemText, { color: theme.textPrimary }]}>Documentation</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.drawerItem} onPress={handleViewHistory}>
+                  <Clock size={20} color={theme.iconColor} />
+                  <Text style={[styles.drawerItemText, { color: theme.textPrimary }]}>Historique</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.drawerItem} onPress={handleSignOut}>
+                  <LogOut size={20} color="#FF3B30" />
+                  <Text style={[styles.drawerItemText, { color: '#FF3B30' }]}>Déconnexion</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            </TouchableWithoutFeedback>
+          </View>
         </TouchableWithoutFeedback>
       )}
 
-      <Animated.View
-        pointerEvents={isMenuOpen ? 'auto' : 'none'}
-        style={[
-          styles.menuContainer,
-          {
-            backgroundColor: theme.menuBackground,
-            borderColor: theme.borderColor,
-            opacity: menuProgress,
-            width: drawerWidth,
-            transform: [{ translateX: menuTranslate }],
-          },
-        ]}
-      >
-        <TouchableOpacity style={styles.menuItem} onPress={handleToggleTheme}>
-          <View style={styles.menuItemContent}>
-            <Moon color="#0A1F44" size={20} />
-            <Text style={styles.menuItemLabel}>{isDarkMode ? 'Mode clair' : 'Mode sombre'}</Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.menuItem} onPress={handleOpenDocs}>
-          <View style={styles.menuItemContent}>
-            <Info color="#0A1F44" size={20} />
-            <Text style={styles.menuItemLabel}>À propos</Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.menuItem} onPress={handleViewHistory}>
-          <View style={styles.menuItemContent}>
-            <Clock color="#0A1F44" size={20} />
-            <Text style={styles.menuItemLabel}>Historique</Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.menuItem, styles.menuItemDanger]} onPress={handleSignOut}>
-          <View style={styles.menuItemContent}>
-            <LogOut color="#FFFFFF" size={20} />
-            <Text style={[styles.menuItemLabel, styles.menuItemDangerLabel]}>Déconnexion</Text>
-          </View>
-        </TouchableOpacity>
-      </Animated.View>
-
       <ScrollView
-        style={[styles.content, { backgroundColor: theme.background }]}
-        refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={loadStats} />
-        }
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadStats} />}
       >
-        <View style={styles.welcomeCard}>
-          <View style={styles.welcomeHeader}>
-            <ShieldCheck color="#FFFFFF" size={28} style={styles.welcomeBadgeIcon} />
-            <Text style={styles.welcomeText}>
-              Bienvenue, {profile?.first_name} !
-            </Text>
+        {/* Stats Cards */}
+        <View style={styles.statsGrid}>
+          <View style={[styles.statCard, { backgroundColor: theme.cardBackground, borderColor: theme.borderColor }]}>
+            <Users size={32} color="#007AFF" />
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{stats.totalClients}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Clients</Text>
           </View>
-          <Text style={styles.welcomeSubtext}>
-            Tableau de bord administrateur
-          </Text>
-        </View>
-
-        <View style={styles.statsCardContainer}>
-          <View style={styles.sectionHeader}>
-            <BarChart color="#FFFFFF" size={20} />
-            <Text style={styles.sectionHeaderTitle}>Statistiques</Text>
+          <View style={[styles.statCard, { backgroundColor: theme.cardBackground, borderColor: theme.borderColor }]}>
+            <Wrench size={32} color="#34C759" />
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{stats.totalMechanics}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Mécaniciens</Text>
           </View>
-          <View style={styles.statsGrid}>
-            <View style={styles.statCard}>
-              <Users color="#0A1F44" size={24} />
-              <Text style={styles.statValue}>{stats.totalClients}</Text>
-              <Text style={styles.statLabel}>Clients</Text>
-            </View>
-
-            <View style={styles.statCard}>
-              <Wrench color="#0A1F44" size={24} />
-              <Text style={styles.statValue}>{stats.totalMechanics}</Text>
-              <Text style={styles.statLabel}>Mécaniciens</Text>
-            </View>
-
-            <View style={styles.statCard}>
-              <ClipboardList color="#0A1F44" size={24} />
-              <Text style={styles.statValue}>{stats.totalServices}</Text>
-              <Text style={styles.statLabel}>Interventions</Text>
-            </View>
-
-            <View style={styles.statCard}>
-              <AlertCircle color="#0A1F44" size={20} />
-              <Text style={styles.statValue}>{stats.totalReports}</Text>
-              <Text style={styles.statLabel}>Signalements</Text>
-            </View>
+          <View style={[styles.statCard, { backgroundColor: theme.cardBackground, borderColor: theme.borderColor }]}>
+            <ClipboardList size={32} color="#FF9500" />
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{stats.totalServices}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Services</Text>
+          </View>
+          <View style={[styles.statCard, { backgroundColor: theme.cardBackground, borderColor: theme.borderColor }]}>
+            <AlertCircle size={32} color="#FF3B30" />
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{stats.totalReports}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Signalements</Text>
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Services récents</Text>
-          {recentServices.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={[styles.emptyStateText, { color: theme.textSecondary }]}>Aucun service récent</Text>
-            </View>
-          ) : (
-            recentServices.map((service) => (
-              <View
-                key={service.id}
-                style={[styles.serviceCard, { backgroundColor: theme.cardBackground }]}
-              >
-                <View style={styles.serviceHeader}>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      {
-                        backgroundColor:
-                          service.status === 'completed'
-                            ? '#E5F5E5'
-                            : service.status === 'cancelled'
-                              ? '#FFE5E5'
-                              : '#E5F0FF',
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.statusText,
-                        {
-                          color:
-                            service.status === 'completed'
-                              ? '#34C759'
-                              : service.status === 'cancelled'
-                                ? '#FF3B30'
-                                : '#007AFF',
-                        },
-                      ]}
-                    >
-                      {service.status === 'completed'
-                        ? 'Terminé'
-                        : service.status === 'cancelled'
-                          ? 'Annulé'
-                          : service.status === 'in_progress'
-                            ? 'En cours'
-                            : service.status === 'accepted'
-                              ? 'Accepté'
-                              : 'En attente'}
-                    </Text>
-                  </View>
-                  <Text style={[styles.serviceType, { color: theme.textPrimary }]}> 
-                    {service.service_type}
+        {/* Utilisateurs inscrits */}
+        <View style={[styles.section, { backgroundColor: theme.cardBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Utilisateurs inscrits ({users.length})</Text>
+          {users.length > 0 ? (
+            users.map((u: any, index: number) => (
+              <View key={u._id || u.id || index} style={[styles.userRow, { borderBottomColor: theme.borderColor }]}> 
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.userName, { color: theme.textPrimary }]}>
+                    {`${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Utilisateur'}
+                  </Text>
+                  <Text style={[styles.userMeta, { color: theme.textSecondary }]}>
+                    {(u.role === 'ADMIN' ? 'Admin' : u.role === 'MECANICIEN' ? 'Mécanicien' : 'Client')} • {u.phoneNumber || '—'}
                   </Text>
                 </View>
-                <Text style={[styles.serviceDescription, { color: theme.textSecondary }]}>
-                  {service.description}
-                </Text>
-                <Text style={[styles.serviceDate, { color: theme.textSecondary }]}>
-                  {new Date(service.created_at).toLocaleDateString('fr-FR', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </Text>
               </View>
             ))
+          ) : (
+            <Text style={[styles.emptyMessage, { color: theme.textSecondary }]}>Aucun utilisateur pour le moment</Text>
+          )}
+        </View>
+
+        {/* Recent Services */}
+        <View style={[styles.section, { backgroundColor: theme.cardBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Services Récents</Text>
+          {recentServices.length > 0 ? (
+            recentServices.map((service, index) => (
+              <View key={index} style={[styles.serviceItem, { borderBottomColor: theme.borderColor }]}>
+                <Text style={[styles.serviceName, { color: theme.textPrimary }]}>{service.name || 'Service'}</Text>
+                <Text style={[styles.serviceDate, { color: theme.textSecondary }]}>{formatDate(service.created_at)}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={[styles.emptyMessage, { color: theme.textSecondary }]}>
+              Aucun service récent pour le moment
+            </Text>
           )}
         </View>
       </ScrollView>
+
+      {/* Bouton flottant pour la messagerie */}
+      <TouchableOpacity
+        style={[styles.floatingButton, { backgroundColor: '#0A1F44' }]}
+        onPress={() => router.push('/(admin)/messages' as any)}
+        activeOpacity={0.8}
+      >
+        <MessageCircle size={28} color="#FFFFFF" />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -341,228 +308,179 @@ export default function AdminDashboardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
-    position: 'relative',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 16,
     paddingTop: 60,
     paddingBottom: 16,
-    paddingHorizontal: 16,
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
   },
-  headerButton: {
+  menuButton: {
     padding: 8,
   },
-  headerCenter: {
-    alignItems: 'center',
-    gap: 2,
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'center',
   },
-  adminBadgeIcon: {
+  headerIcons: {
+    padding: 8,
+  },
+  roleBanner: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  roleContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  crownIcon: {
     marginRight: 8,
   },
-  headerTextGroup: {
-    alignItems: 'center',
-  },
-  logo: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FF9500',
-  },
-  subtitle: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  content: {
-    flex: 1,
-  },
-  welcomeCard: {
-    backgroundColor: '#0A1F44',
-    margin: 16,
-    padding: 20,
-    borderRadius: 12,
-  },
-  welcomeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  welcomeBadgeIcon: {
-    marginRight: 4,
-  },
-  welcomeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 4,
-  },
-  welcomeSubtext: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    opacity: 0.9,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: 0,
-    marginBottom: 0,
-    marginTop: 12,
-    gap: 12,
-    justifyContent: 'space-between',
-  },
-  statCard: {
-    width: '42%',
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    borderRadius: 6,
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#B3C8FF',
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#0A1F44',
-    marginVertical: 4,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: '#0A1F44',
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    color: '#000',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  sectionHeaderTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  statsCardContainer: {
-    backgroundColor: '#0A1F44',
-    marginHorizontal: 16,
-    marginBottom: 24,
-    borderRadius: 16,
-    padding: 16,
-    gap: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
-  },
-  serviceCard: {
-    backgroundColor: '#D9E8FF',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 16,
-    borderRadius: 12,
-  },
-  serviceHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    gap: 8,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  serviceType: {
+  roleTitle: {
     fontSize: 16,
     fontWeight: '600',
-    flex: 1,
-    color: '#0A1F44',
+    marginRight: 8,
   },
-  serviceDescription: {
-    fontSize: 14,
-    marginBottom: 8,
-    color: '#0A1F44',
-  },
-  serviceDate: {
-    fontSize: 12,
-    color: '#0A1F44',
-  },
-  emptyState: {
-    padding: 24,
-    marginHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: '#D9E8FF',
+  adminBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#0A1F44',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
   },
-  emptyStateText: {
-    fontSize: 14,
-    color: '#0A1F44',
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
-  menuOverlay: {
+  overlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    zIndex: 5,
-  },
-  menuContainer: {
-    position: 'absolute',
-    top: 116,
-    left: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    paddingVertical: 18,
-    paddingHorizontal: 12,
-    gap: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     zIndex: 10,
-    backgroundColor: '#FFFFFF',
+  },
+  drawer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    paddingTop: 60,
+    paddingHorizontal: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    shadowOffset: { width: 2, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
-  menuItem: {
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: '#F1F4FA',
+  drawerHeader: {
+    marginBottom: 24,
   },
-  menuItemContent: {
+  drawerTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  drawerItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 14,
     gap: 12,
   },
-  menuItemLabel: {
-    fontSize: 15,
+  drawerItemText: {
+    fontSize: 16,
+  },
+  scrollContent: {
+    padding: 16,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 24,
+  },
+  statCard: {
+    flex: 1,
+    minWidth: '45%',
+    padding: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    gap: 8,
+  },
+  statValue: {
+    fontSize: 32,
+    fontWeight: '700',
+  },
+  statLabel: {
+    fontSize: 14,
+  },
+  section: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  sectionTitle: {
+    fontSize: 18,
     fontWeight: '600',
-    color: '#0A1F44',
+    marginBottom: 16,
   },
-  menuItemDanger: {
-    backgroundColor: '#0A1F44',
+  serviceItem: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
   },
-  menuItemDangerLabel: {
-    color: '#FFFFFF',
+  serviceName: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  serviceDate: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+  emptyMessage: {
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
+  userRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  userMeta: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  floatingButton: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
 });
