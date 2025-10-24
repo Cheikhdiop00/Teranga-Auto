@@ -129,8 +129,8 @@ export default function AdminDashboardScreen() {
       setStats({
         totalClients: res.totalClients ?? 0,
         totalMechanics: res.totalMechanics ?? 0,
-        totalServices: 0, // TODO: brancher quand l'endpoint services sera prêt
-        totalReports: 0,  // TODO: brancher quand l'endpoint reports sera prêt
+        totalServices: res.totalServices ?? 0,
+        totalReports: res.totalReports ?? 0,
       });
 
       setRecentServices([]); // TODO: charger les services récents quand l'API sera prête

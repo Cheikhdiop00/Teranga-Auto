@@ -4,6 +4,8 @@ import { requireRoles, requireAuth } from '../middlewares/auth.js';
 import User from '../models/User.js';
 import Client from '../models/Client.js';
 import Mechanic from '../models/Mechanic.js';
+import Service from '../models/Service.js';
+import Complaint from '../models/Complaint.js';
 
 const router = Router();
 
@@ -158,15 +160,23 @@ router.get(
  *                 totalClients: { type: number }
  *                 totalMechanics: { type: number }
  *                 activeUsers: { type: number }
+ *                 totalServices: { type: number }
+ *                 totalReports: { type: number }
  */
 router.get(
   '/stats',
   asyncHandler(async (req, res) => {
     const totalUsers = await User.countDocuments();
-    const totalClients = await Client.countDocuments();
-    const totalMechanics = await Mechanic.countDocuments();
+    // Compter par rôle directement dans la table Users
+    const totalClients = await User.countDocuments({ role: 'CLIENT' });
+    const totalMechanics = await User.countDocuments({ role: 'MECANICIEN' });
     const activeUsers = await User.countDocuments({ status: 'active' });
-    res.json({ totalUsers, totalClients, totalMechanics, activeUsers });
+    const totalServices = await Service.countDocuments();
+    const totalReports = await Complaint.countDocuments();
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.json({ totalUsers, totalClients, totalMechanics, activeUsers, totalServices, totalReports });
   })
 );
 
