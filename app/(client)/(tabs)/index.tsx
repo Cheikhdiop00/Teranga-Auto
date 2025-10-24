@@ -10,6 +10,7 @@ import {
   Animated,
   Easing,
   FlatList,
+  Linking,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -24,9 +25,12 @@ import {
   CircuitBoard,
   Disc,
   Shield,
+  ChevronRight,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/config/api';
 import { Profile } from '@/types/database';
 
 const MECHANIC_TYPES = [
@@ -47,6 +51,7 @@ export default function ClientHomeScreen() {
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const servicesAnimation = useRef(new Animated.Value(0)).current;
   const [locationText, setLocationText] = useState<string>('');
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     loadMechanics();
@@ -70,6 +75,7 @@ export default function ClientHomeScreen() {
           return;
         }
         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         const places = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
         if (places && places.length > 0) {
           const p = places[0];
@@ -77,14 +83,68 @@ export default function ClientHomeScreen() {
           const country = p.country || '';
           const label = [city, country].filter(Boolean).join(', ');
           setLocationText(label || `${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`);
+          // Sauvegarder la position (adresse + coordonnées)
+          await saveLocation({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            address: label,
+          });
         } else {
           setLocationText(`${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`);
+          await saveLocation({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            address: undefined,
+          });
         }
       } catch {
         setLocationText('Localisation indisponible');
       }
     })();
   }, []);
+
+  const openMap = async () => {
+    try {
+      if (coords) {
+        const url = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+        await Linking.openURL(url);
+        return;
+      }
+      // Si pas de coords en mémoire, tenter de récupérer vite
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const url = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+      await Linking.openURL(url);
+    } catch (e) {
+      Alert.alert('Localisation', "Impossible d'ouvrir la carte. Activez la localisation.");
+    }
+  };
+
+  // Enregistrer la position de l'utilisateur CLIENT dans la base (collection Clients)
+  const saveLocation = async ({ latitude, longitude, address }: { latitude: number; longitude: number; address?: string }) => {
+    try {
+      // Récupérer le token d'auth et lister les clients pour trouver le client lié à l'utilisateur courant
+      const token = await AsyncStorage.getItem('authToken');
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const listRes = await fetch(`${API_URL}/api/clients`, { headers });
+      if (!listRes.ok) return;
+      const clients = await listRes.json();
+      // Trouver le document client dont le champ user correspond à l'utilisateur courant
+      const currentUserId = (profile as any)?.id || (profile as any)?._id;
+      const me = Array.isArray(clients) ? clients.find((c: any) => String(c.user) === String(currentUserId)) : null;
+      if (!me || !me._id) return;
+
+      // Mettre à jour latitude/longitude et adresse
+      await fetch(`${API_URL}/api/clients/${me._id}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ latitude, longitude, ...(address ? { address } : {}) }),
+      });
+    } catch (e) {
+      // ne rien afficher à l'utilisateur, silencieux
+    }
+  };
 
   const loadMechanics = async () => {
     try {
@@ -141,10 +201,13 @@ export default function ClientHomeScreen() {
         <TouchableOpacity style={styles.headerButton}>
           <Menu color="#000" size={24} />
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.logo}>TerangaAuto</Text>
-          <Text style={styles.location}>{locationText || 'Localisation...'}</Text>
-        </View>
+      <View style={styles.headerCenter}>
+  <Text style={styles.logo}>TerangaAuto</Text>
+  <TouchableOpacity style={styles.locationPill} onPress={openMap} activeOpacity={0.8}>
+    <Text style={styles.locationPillText}>{locationText || 'Votre position'}</Text>
+   
+  </TouchableOpacity>
+</View>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerButton}>
             <Bell color="#000" size={24} />
