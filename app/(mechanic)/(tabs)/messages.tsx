@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, FlatList, TextInput, Image, ImageSourcePropType, ListRenderItem } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/config/api';
 import { SwipeableRow } from '../../../components/SwipeableRow';
 
 // Types
@@ -33,33 +35,16 @@ type MessageBubbleProps = {
   time: string;
 };
 
-// Données factices pour les conversations
-const mockConversations: Conversation[] = [
-  {
-    id: '1',
-    userName: 'Jean Dupont',
-    lastMessage: 'Bonjour, pourriez-vous me donner un devis ?',
-    time: '10:30',
-    unread: 2,
-    avatar: 'https://randomuser.me/api/portraits/men/1.jpg',
-  },
-  {
-    id: '2',
-    userName: 'Marie Martin',
-    lastMessage: 'Merci pour votre aide !',
-    time: 'Hier',
-    unread: 0,
-    avatar: 'https://randomuser.me/api/portraits/women/1.jpg',
-  },
-  {
-    id: '3',
-    userName: 'Auto Service 24/7',
-    lastMessage: 'Votre rendez-vous est confirmé pour demain',
-    time: 'Lun',
-    unread: 0,
-    avatar: 'https://randomuser.me/api/portraits/lego/1.jpg',
-  },
-];
+// Conversations chargées depuis l'API
+const formatTime = (iso?: string) => {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString();
+  } catch {
+    return '';
+  }
+};
 
 // Composant d'un élément de conversation
 const ConversationItem: React.FC<ConversationItemProps> = ({ item, onPress }) => (
@@ -99,12 +84,59 @@ export default function MechanicMessagesScreen() {
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [message, setMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     // Implémentez ici la logique de recherche si nécessaire
   };
+
+  const filteredConversations = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter((c) =>
+      c.userName.toLowerCase().includes(q) ||
+      c.lastMessage.toLowerCase().includes(q)
+    );
+  }, [searchQuery, conversations]);
+
+  const loadConversations = async () => {
+    try {
+      setLoading(true);
+      const token = await AsyncStorage.getItem('authToken');
+      const res = await fetch(`${API_URL}/api/messages/conversations`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) throw new Error('Failed to load conversations');
+      const data = await res.json();
+      const convs: Conversation[] = (data.data || []).map((c: any) => {
+        const other = (c.participants || []).find((p: any) => (p._id || p.id) !== c.currentUserId) || c.participants?.[0] || {};
+        return {
+          id: c._id || c.id,
+          userName: other.firstName ? `${other.firstName} ${other.lastName || ''}`.trim() : 'Conversation',
+          lastMessage: c.lastMessage?.content || '',
+          time: formatTime(c.lastMessage?.createdAt),
+          unread: c.unreadCount || 0,
+          avatar: other.profilePhoto || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(other.firstName || 'U')
+        };
+      });
+      setConversations(convs);
+    } catch {
+      setConversations([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadConversations();
+  }, []);
 
   // Messages factices pour la conversation sélectionnée
   const [messages, setMessages] = useState<Message[]>([
@@ -133,7 +165,7 @@ export default function MechanicMessagesScreen() {
   const renderConversationItem: ListRenderItem<Conversation> = ({ item }) => (
     <ConversationItem 
       item={item} 
-      onPress={() => setSelectedConversation(item)} 
+      onPress={() => router.push(`/(mechanic)/chat/${item.id}` as any)} 
     />
   );
 
@@ -225,10 +257,12 @@ export default function MechanicMessagesScreen() {
       </View>
 
       <FlatList
-        data={mockConversations}
+        data={filteredConversations}
         keyExtractor={(item) => item.id}
         renderItem={renderConversationItem}
         style={styles.conversationList}
+        refreshing={loading}
+        onRefresh={loadConversations}
       />
     </SafeAreaView>
   );
