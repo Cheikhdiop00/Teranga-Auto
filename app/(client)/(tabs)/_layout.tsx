@@ -20,14 +20,14 @@ export default function ClientTabsLayout() {
       <Tabs.Screen
         name="history"
         options={{
-          title: 'Historique',
+          title: 'Historique', 
           tabBarIcon: ({ color, size }) => <History color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="messages"
         options={{
-          title: 'Messages',
+          title: 'Chatbot IA',
           tabBarIcon: ({ color, size }) => <MessageCircle color={color} size={size} />,
         }}
       />
@@ -38,6 +38,7 @@ export default function ClientTabsLayout() {
           tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
         }}
       />
+      
     </Tabs>
   );
 }

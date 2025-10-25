@@ -1,8 +1,11 @@
 import { Router } from 'express';
-import Review from '../models/Review.js';
-import { buildCrudRouter } from '../utils/crud.js';
-import { asyncHandler } from '../utils/asyncHandler.js';
 import mongoose from 'mongoose';
+import Review from '../models/Review.js';
+import Mechanic from '../models/Mechanic.js';
+import Notification from '../models/Notification.js';
+import { crudHandlers } from '../utils/crud.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { getIO } from '../socket.js';
 
 const router = Router();
 
@@ -13,7 +16,78 @@ const router = Router();
  *   description: Avis des clients sur les mécaniciens
  */
 
-router.use('/', buildCrudRouter(Review, 'Review'));
+const handlers = crudHandlers(Review, 'Review');
+
+router.post(
+  '/',
+  asyncHandler(async (req, res) => {
+    const { client, mechanic, breakdown, rating, comment, date } = req.body || {};
+
+    if (!client || !mechanic || !rating) {
+      return res.status(400).json({ message: 'client, mechanic et rating sont requis.' });
+    }
+
+    const review = await Review.create({
+      client,
+      mechanic,
+      breakdown,
+      rating,
+      comment,
+      date: date ? new Date(date) : undefined,
+    });
+
+    const mechanicId = String(review.mechanic);
+    const mechanicObjectId = new mongoose.Types.ObjectId(mechanicId);
+
+    const [stats] = await Review.aggregate([
+      { $match: { mechanic: mechanicObjectId } },
+      { $group: { _id: '$mechanic', avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+    ]);
+
+    const average = Number(stats?.avg ?? 0);
+    const count = Number(stats?.count ?? 0);
+
+    const mechanicDoc = await Mechanic.findByIdAndUpdate(
+      mechanicId,
+      { reputation: average, interventionsCount: count },
+      { new: true },
+    )
+      .populate({ path: 'user', select: 'firstName lastName _id' })
+      .lean();
+
+    const mechanicUserId = mechanicDoc?.user?._id || mechanicDoc?.user;
+
+    if (mechanicUserId) {
+      await Notification.create({
+        user: mechanicUserId,
+        title: 'Nouvel avis reçu',
+        content: `Vous avez reçu une note de ${rating}/5${comment ? `: "${comment}"` : '.'}`,
+        type: 'review',
+      });
+
+      const io = getIO();
+      if (io) {
+        io.to(`user_${mechanicUserId}`).emit('review_received', {
+          review,
+          stats: { average, count },
+        });
+      }
+    }
+
+    res.status(201).json({
+      review,
+      mechanicStats: {
+        average,
+        count,
+      },
+    });
+  }),
+);
+
+router.get('/', handlers.list);
+router.get('/:id', handlers.get);
+router.patch('/:id', handlers.update);
+router.delete('/:id', handlers.remove);
 
 /**
  * @openapi

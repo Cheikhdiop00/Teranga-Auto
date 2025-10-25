@@ -30,6 +30,7 @@ import {
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCollection, api } from '@/lib/supabase';
+import { API_BASE_URL } from '@/config/api';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -133,7 +134,32 @@ export default function AdminDashboardScreen() {
         totalReports: res.totalReports ?? 0,
       });
 
-      setRecentServices([]); // TODO: charger les services récents quand l'API sera prête
+      // Charger les 3 derniers services depuis l'API backend
+      try {
+        const token = await AsyncStorage.getItem('authToken');
+        const r = await fetch(`${API_BASE_URL}/services`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            action: 'find',
+            query: {},
+            sort: { createdAt: -1 },
+            limit: 3,
+          }),
+        });
+        if (r.ok) {
+          const json = await r.json();
+          const list = Array.isArray(json.data) ? json.data : [];
+          setRecentServices(list.slice(0, 3));
+        } else {
+          setRecentServices([]);
+        }
+      } catch {
+        setRecentServices([]);
+      }
       console.log('Stats loaded successfully');
     } catch (error) {
       console.error('Error loading stats:', error);
@@ -279,14 +305,14 @@ export default function AdminDashboardScreen() {
         <View style={[styles.section, { backgroundColor: theme.cardBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Services Récents</Text>
           {recentServices.length > 0 ? (
-            recentServices.map((service, index) => (
-              <View key={index} style={[styles.serviceItem, { borderBottomColor: theme.borderColor }]}>
+            recentServices.slice(0, 3).map((service: any, index: number) => (
+              <View key={service._id || service.id || index} style={[styles.serviceItem, { borderBottomColor: theme.borderColor }]}> 
                 <Text style={[styles.serviceName, { color: theme.textPrimary }]}>{service.name || 'Service'}</Text>
-                <Text style={[styles.serviceDate, { color: theme.textSecondary }]}>{formatDate(service.created_at)}</Text>
+                <Text style={[styles.serviceDate, { color: theme.textSecondary }]}>{formatDate(service.createdAt || service.created_at)}</Text>
               </View>
             ))
           ) : (
-            <Text style={[styles.emptyMessage, { color: theme.textSecondary }]}>
+            <Text style={[styles.emptyMessage, { color: theme.textSecondary }]}> 
               Aucun service récent pour le moment
             </Text>
           )}

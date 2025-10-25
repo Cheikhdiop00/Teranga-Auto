@@ -13,6 +13,27 @@ const router = Router();
  *   description: Notifications utilisateur
  */
 
+router.get(
+  '/',
+  asyncHandler(async (req, res) => {
+    const filter: Record<string, any> = {};
+    const { userId, read } = req.query;
+
+    if (userId && typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)) {
+      filter.user = userId;
+    }
+
+    if (read !== undefined) {
+      if (read === 'true' || read === 'false') {
+        filter.read = read === 'true';
+      }
+    }
+
+    const notifications = await Notification.find(filter).sort({ createdAt: -1 }).lean();
+    res.json({ count: notifications.length, data: notifications });
+  }),
+);
+
 router.use('/', buildCrudRouter(Notification, 'Notification'));
 
 /**
