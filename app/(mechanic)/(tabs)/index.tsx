@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Alert, Switch, useColorScheme, Linking, ToastAndroid, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Alert, Switch, useColorScheme, Linking, ToastAndroid, Platform, Modal, FlatList, ActivityIndicator } from 'react-native';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Menu, Bell, MessageCircle, Search, MapPin } from 'lucide-react-native';
 import Sidebar from '@/components/Sidebar';
@@ -10,6 +10,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/config/api';
 import { useRouter } from 'expo-router';
 import { io, Socket } from 'socket.io-client';
+
+const parseJSONSafe = async (response: any) => {
+  try {
+    if (!response) return null;
+    if (response.status === 204 || response.status === 304) return null;
+    const text = await response.text();
+    if (!text) return null;
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
 
 export default function MechanicHomeScreen() {
   const router = useRouter();
@@ -26,6 +38,12 @@ export default function MechanicHomeScreen() {
   const [unreadNotifications, setUnreadNotifications] = useState<number>(0);
   const [ratingAverage, setRatingAverage] = useState<number>(profile?.rating_average ?? 0);
   const [ratingCount, setRatingCount] = useState<number>(profile?.rating_count ?? 0);
+  const [notificationsModalVisible, setNotificationsModalVisible] = useState(false);
+  const [pendingNotifications, setPendingNotifications] = useState<any[]>([]);
+  const [markingNotifications, setMarkingNotifications] = useState(false);
+  const [complaintsDrawerVisible, setComplaintsDrawerVisible] = useState(false);
+  const [complaints, setComplaints] = useState<any[]>([]);
+  const [loadingComplaints, setLoadingComplaints] = useState(false);
 
   const toggleTheme = () => {
     setIsDarkMode(prev => !prev);
@@ -81,6 +99,14 @@ export default function MechanicHomeScreen() {
     }
   };
 
+  const showInfoToast = (message: string, title: string = 'Informations') => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
   const fetchUnreadNotifications = useCallback(async () => {
     try {
       const currentUserId = (profile as any)?.id || (profile as any)?._id;
@@ -92,13 +118,14 @@ export default function MechanicHomeScreen() {
       const searchParams = new URLSearchParams({
         userId: String(currentUserId),
         read: 'false',
+        type: 'complaint',
       });
       const res = await fetch(`${API_URL}/api/notifications?${searchParams.toString()}`, { headers });
-      if (!res.ok) {
+      if (!res.ok && res.status !== 304) {
         setUnreadNotifications(0);
         return;
       }
-      const payload = await res.json();
+      const payload = await parseJSONSafe(res);
       const items = Array.isArray(payload)
         ? payload
         : Array.isArray(payload?.data)
@@ -109,6 +136,109 @@ export default function MechanicHomeScreen() {
       setUnreadNotifications(0);
     }
   }, [API_URL, getAuthHeaders, profile]);
+
+  const fetchComplaints = useCallback(async () => {
+    try {
+      const currentUserId = (profile as any)?.id || (profile as any)?._id;
+      if (!currentUserId) {
+        setComplaints([]);
+        return;
+      }
+      setLoadingComplaints(true);
+      const headers = await getAuthHeaders();
+      const [notificationsRes, complaintsRes] = await Promise.all([
+        fetch(
+          `${API_URL}/api/notifications?${new URLSearchParams({
+            userId: String(currentUserId),
+            type: 'complaint',
+          }).toString()}`,
+          { headers },
+        ),
+        fetch(
+          `${API_URL}/api/complaints?${new URLSearchParams({
+            sort: '-createdAt',
+            limit: '50',
+          }).toString()}`,
+          { headers },
+        ),
+      ]);
+
+      const notificationsPayload = notificationsRes.ok || notificationsRes.status === 304 ? await parseJSONSafe(notificationsRes) : { data: [] };
+      const complaintsPayload = complaintsRes.ok || complaintsRes.status === 304 ? await parseJSONSafe(complaintsRes) : { data: [] };
+
+      const notificationsArray = Array.isArray(notificationsPayload)
+        ? notificationsPayload
+        : Array.isArray(notificationsPayload?.data)
+          ? notificationsPayload.data
+          : [];
+
+      const complaintsArray = Array.isArray(complaintsPayload)
+        ? complaintsPayload
+        : Array.isArray(complaintsPayload?.data)
+          ? complaintsPayload.data
+          : [];
+
+      const enriched = complaintsArray.map((complaint: any) => {
+        const relatedNotification = notificationsArray.find((notif: any) => {
+          const notifComplaintId = notif?.metadata?.complaintId || notif?.complaintId;
+          return notifComplaintId && String(notifComplaintId) === String(complaint?._id);
+        });
+
+        return {
+          ...complaint,
+          notification: relatedNotification,
+        };
+      });
+
+      setComplaints(enriched);
+    } catch (error) {
+      console.error('Unable to fetch complaints', error);
+      setComplaints([]);
+    } finally {
+      setLoadingComplaints(false);
+    }
+  }, [API_URL, getAuthHeaders, profile]);
+
+  const openComplaintsDrawer = useCallback(() => {
+    setComplaintsDrawerVisible(true);
+    fetchComplaints();
+  }, [fetchComplaints]);
+
+  const closeComplaintsDrawer = useCallback(() => {
+    setComplaintsDrawerVisible(false);
+  }, []);
+
+  const renderComplaintItem = useCallback(
+    ({ item }: { item: any }) => {
+      const notification = item?.notification;
+      const isUnread = notification ? !notification.read : false;
+      const timestamp = notification?.sentAt || item?.createdAt;
+      const formattedDate = timestamp ? new Date(timestamp).toLocaleString() : '';
+      const title = notification?.title || 'Signalement client';
+
+      return (
+        <View style={styles.complaintItem}>
+          <View style={styles.complaintHeaderRow}>
+            <View style={styles.complaintTitleWrapper}>
+              <View
+                style={[
+                  styles.complaintStatusDot,
+                  isUnread ? styles.complaintStatusDotUnread : styles.complaintStatusDotRead,
+                ]}
+              />
+              <Text style={[styles.complaintTitle, isUnread && styles.complaintTitleUnread]}>{title}</Text>
+            </View>
+            {formattedDate ? <Text style={styles.complaintDate}>{formattedDate}</Text> : null}
+          </View>
+          <Text style={[styles.complaintMessage, isUnread && styles.complaintMessageUnread]}>
+            {item?.description || 'Nouvelle réclamation.'}
+          </Text>
+          <Text style={styles.complaintDest}>Destinataire : Vous</Text>
+        </View>
+      );
+    },
+    [],
+  );
 
   const fetchMechanicDocId = useCallback(async () => {
     if (mechanicDocId) {
@@ -192,35 +322,76 @@ export default function MechanicHomeScreen() {
       const searchParams = new URLSearchParams({
         userId: String(currentUserId),
         read: 'false',
+        type: 'complaint',
       });
       const res = await fetch(`${API_URL}/api/notifications?${searchParams.toString()}`, { headers });
-      if (res.ok) {
-        const payload = await res.json();
+      if (res.ok || res.status === 304) {
+        const payload = await parseJSONSafe(res);
         const items = Array.isArray(payload)
           ? payload
           : Array.isArray(payload?.data)
             ? payload.data
             : [];
+        if (items.length === 0) {
+          showInfoToast('Aucune nouvelle notification.', 'Notifications');
+          openComplaintsDrawer();
+          return;
+        }
 
-        await Promise.all(
-          items
-            .map((notif: any) => notif?._id || notif?.id)
-            .filter(Boolean)
-            .map((id: string) =>
-              fetch(`${API_URL}/api/notifications/${id}/read`, {
-                method: 'PATCH',
-                headers,
-              }),
-            ),
-        );
+        setPendingNotifications(items);
+        setNotificationsModalVisible(true);
       }
-      setUnreadNotifications(0);
-      Alert.alert('Notifications', 'Toutes les notifications ont été marquées comme lues.');
     } catch (error) {
       console.error('Failed to mark notifications as read', error);
-      Alert.alert('Notifications', "Impossible de mettre à jour les notifications.");
+      showInfoToast("Impossible de mettre à jour les notifications.", 'Notifications');
     }
-  }, [API_URL, getAuthHeaders, profile]);
+  }, [API_URL, getAuthHeaders, openComplaintsDrawer, profile, showInfoToast]);
+
+  const handleConfirmNotifications = useCallback(async () => {
+    if (markingNotifications) return;
+    try {
+      setMarkingNotifications(true);
+      const headers = await getAuthHeaders();
+      if (!headers) {
+        setMarkingNotifications(false);
+        return;
+      }
+      const ids = pendingNotifications
+        .map((notif) => notif?._id || notif?.id)
+        .filter(Boolean) as string[];
+
+      if (ids.length === 0) {
+        setNotificationsModalVisible(false);
+        openComplaintsDrawer();
+        return;
+      }
+
+      await Promise.all(
+        ids.map((id) =>
+          fetch(`${API_URL}/api/notifications/${id}/read`, {
+            method: 'PATCH',
+            headers,
+          }),
+        ),
+      );
+
+      setUnreadNotifications((prev) => Math.max(prev - ids.length, 0));
+      setPendingNotifications([]);
+      setNotificationsModalVisible(false);
+      showInfoToast('Notifications marquées comme lues.', 'Notifications');
+      fetchUnreadNotifications();
+      openComplaintsDrawer();
+    } catch (error) {
+      console.error('Failed to confirm notifications', error);
+      showInfoToast("Impossible de marquer les notifications comme lues.", 'Notifications');
+    } finally {
+      setMarkingNotifications(false);
+    }
+  }, [API_URL, fetchUnreadNotifications, getAuthHeaders, markingNotifications, openComplaintsDrawer, pendingNotifications, showInfoToast]);
+
+  const handleDismissNotifications = useCallback(() => {
+    setNotificationsModalVisible(false);
+  }, []);
 
   const openMap = async () => {
     try {
@@ -259,6 +430,8 @@ export default function MechanicHomeScreen() {
  
   const [pendingServices, setPendingServices] = useState<Service[]>([]);
   const [activeService, setActiveService] = useState<Service | null>(null);
+  const [completedServicesCount, setCompletedServicesCount] = useState<number>(0);
+  const [navigatingToActiveService, setNavigatingToActiveService] = useState(false);
   type NearbyBreakdown = {
     id: string;
     clientName: string;
@@ -277,9 +450,43 @@ export default function MechanicHomeScreen() {
   const [incomingBreakdown, setIncomingBreakdown] = useState<NearbyBreakdown | null>(null);
   const [breakdownActionLoading, setBreakdownActionLoading] = useState<string | null>(null);
 
+  const loadServices = useCallback(async () => {
+    try {
+      if (!profile?.id) {
+        setPendingServices([]);
+        setActiveService(null);
+        setCompletedServicesCount(0);
+        return;
+      }
+      const servicesCollection = await getCollection('services');
+
+      const pending = await servicesCollection
+        .find({ status: 'pending' })
+        .sort({ created_at: -1 })
+        .limit(5)
+        .toArray();
+
+      const active = await servicesCollection.findOne({
+        mechanic_id: profile?.id,
+        status: { $in: ['accepted', 'in_progress'] }
+      });
+
+      const completedCount = await servicesCollection.countDocuments({
+        mechanic_id: profile.id,
+        status: 'completed',
+      });
+
+      setPendingServices(pending as Service[]);
+      setActiveService(active as Service | null);
+      setCompletedServicesCount(completedCount);
+    } catch (error) {
+      console.error('Error loading services:', error);
+    }
+  }, [profile?.id]);
+
   useEffect(() => {
     loadServices();
-  }, []);
+  }, [loadServices]);
 
   useEffect(() => {
     (async () => {
@@ -409,6 +616,26 @@ export default function MechanicHomeScreen() {
         console.log('Socket connecté pour les pannes');
       });
 
+      socket.on('breakdown_completed', async (payload: any) => {
+        try {
+          const breakdown = payload?.breakdown;
+          if (!breakdown) return;
+          const completedId = String(breakdown._id || breakdown.id || '');
+          setActiveService((prev) => {
+            if (!prev) return prev;
+            const prevId = String((prev as any).id || (prev as any)._id || '');
+            if (completedId && prevId && completedId === prevId) {
+              return { ...prev, status: 'completed' } as Service;
+            }
+            return prev;
+          });
+          showInfoToast('Mission terminée', 'Le client a confirmé la fin de la mission.');
+          await loadServices();
+        } catch (error) {
+          console.warn('Erreur lors du traitement breakdown_completed:', error);
+        }
+      });
+
       socket.on('breakdown_nearby', async (payload: any) => {
         try {
           const breakdown = payload?.breakdown;
@@ -487,7 +714,7 @@ export default function MechanicHomeScreen() {
     } catch (error) {
       console.warn('Impossible de connecter le socket pannes:', error);
     }
-  }, [API_URL, fetchUnreadNotifications, ratingAverage, ratingCount, refreshLocation]);
+  }, [API_URL, fetchUnreadNotifications, loadServices, ratingAverage, ratingCount, refreshLocation, showInfoToast]);
 
   const handleAcceptBreakdown = useCallback(async (breakdown: NearbyBreakdown) => {
     if (!breakdown?.id) return;
@@ -511,6 +738,7 @@ export default function MechanicHomeScreen() {
         const err = await res.json().catch(() => ({ message: 'Erreur lors de l\'acceptation.' }));
         throw new Error(err.message || 'Erreur lors de l\'acceptation.');
       }
+      await loadServices();
       let finalCoords = coords ? { ...coords } : null;
       if (!finalCoords) {
         finalCoords = await refreshLocation();
@@ -540,13 +768,106 @@ export default function MechanicHomeScreen() {
     } finally {
       setBreakdownActionLoading(null);
     }
-  }, [API_URL, coords, fetchMechanicDocId, getAuthHeaders, loadNearbyBreakdowns]);
+  }, [API_URL, coords, fetchMechanicDocId, getAuthHeaders, loadNearbyBreakdowns, loadServices, refreshLocation, router]);
 
   const handleDeclineBreakdown = useCallback((breakdown: NearbyBreakdown) => {
     if (incomingBreakdown?.id === breakdown.id) {
       setIncomingBreakdown(null);
     }
   }, [incomingBreakdown]);
+
+  const handleNavigateToActiveService = useCallback(async () => {
+    if (!activeService) return;
+
+    const parseNumber = (value: any): number | null => {
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      if (typeof value === 'string' && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
+
+    try {
+      setNavigatingToActiveService(true);
+
+      const targetLat =
+        parseNumber((activeService as any).location_lat ?? (activeService as any).latitude ?? (activeService as any).client_lat);
+      const targetLng =
+        parseNumber((activeService as any).location_lng ?? (activeService as any).longitude ?? (activeService as any).client_lng);
+
+      if (targetLat == null || targetLng == null) {
+        Alert.alert('Navigation', 'Coordonnées client indisponibles pour cette mission.');
+        return;
+      }
+
+      let mechanicPosition = coords;
+      if (!mechanicPosition) {
+        const refreshed = await refreshLocation();
+        if (refreshed) mechanicPosition = refreshed;
+      }
+      if (!mechanicPosition) {
+        Alert.alert('Navigation', 'Impossible de récupérer votre position actuelle.');
+        return;
+      }
+
+      let clientName: string | undefined = (activeService as any).client_name || (activeService as any).clientName;
+      let clientPhone: string | undefined = (activeService as any).client_phone || (activeService as any).clientPhone;
+
+      if ((!clientName || !clientPhone) && activeService.client_id) {
+        try {
+          const profilesCollection = await getCollection('profiles');
+          const clientProfile = await profilesCollection.findOne({ _id: activeService.client_id });
+          if (clientProfile) {
+            const firstName = clientProfile.first_name || clientProfile.firstName;
+            const lastName = clientProfile.last_name || clientProfile.lastName;
+            const composedName = [firstName, lastName].filter(Boolean).join(' ');
+            if (!clientName && composedName) clientName = composedName;
+            if (!clientName && clientProfile.name) clientName = clientProfile.name;
+            const phone = clientProfile.phone || clientProfile.phoneNumber || clientProfile.phone_number;
+            if (!clientPhone && phone) clientPhone = phone;
+          }
+        } catch (error) {
+          console.warn('Unable to fetch client profile for active service:', error);
+        }
+      }
+
+      if (!clientName) clientName = 'Client';
+
+      const distanceValue =
+        (activeService as any).distance_km ??
+        (activeService as any).distanceKm ??
+        (activeService as any).distance ??
+        null;
+      const etaValue =
+        (activeService as any).estimated_time ??
+        (activeService as any).estimated_duration ??
+        (activeService as any).eta_min ??
+        null;
+
+      const serviceId = activeService.id || (activeService as any)._id || '';
+
+      router.push({
+        pathname: '/(mechanic)/navigation',
+        params: {
+          breakdownId: serviceId ? String(serviceId) : '',
+          clientName,
+          clientPhone: clientPhone ? String(clientPhone) : '',
+          clientLat: String(targetLat),
+          clientLng: String(targetLng),
+          description: activeService.description || activeService.service_type || 'Mission client',
+          distanceKm: distanceValue != null ? String(distanceValue) : '',
+          etaMin: etaValue != null ? String(etaValue) : '',
+          mechanicLat: mechanicPosition ? String(mechanicPosition.lat) : '',
+          mechanicLng: mechanicPosition ? String(mechanicPosition.lng) : '',
+        },
+      } as never);
+    } catch (error: any) {
+      Alert.alert('Navigation', error?.message || 'Impossible d\'ouvrir la navigation.');
+    } finally {
+      setNavigatingToActiveService(false);
+    }
+  }, [activeService, coords, refreshLocation, router]);
 
   useEffect(() => {
     connectSocket();
@@ -558,28 +879,6 @@ export default function MechanicHomeScreen() {
       }
     };
   }, [connectSocket]);
-
-  const loadServices = async () => {
-    try {
-      const servicesCollection = await getCollection('services');
-      
-      const pending = await servicesCollection
-        .find({ status: 'pending' })
-        .sort({ created_at: -1 })
-        .limit(5)
-        .toArray();
-
-      const active = await servicesCollection.findOne({
-        mechanic_id: profile?.id,
-        status: { $in: ['accepted', 'in_progress'] }
-      });
-
-      setPendingServices(pending as Service[]);
-      setActiveService(active as Service | null);
-    } catch (error) {
-      console.error('Error loading services:', error);
-    }
-  };
 
   const toggleAvailability = async (value: boolean) => {
     try {
@@ -689,6 +988,7 @@ export default function MechanicHomeScreen() {
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <Text style={styles.statValue}>⭐ {ratingAverage.toFixed(1)}</Text>
+
             <Text style={styles.statLabel}>Note moyenne</Text>
           </View>
           <View style={styles.statDivider} />
@@ -696,38 +996,86 @@ export default function MechanicHomeScreen() {
             <Text style={styles.statValue}>{pendingServices.length}</Text>
             <Text style={styles.statLabel}>En attente</Text>
           </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>{completedServicesCount}</Text>
+            <Text style={styles.statLabel}>Missions réalisées</Text>
+          </View>
         </View>
 
         {activeService && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Mission en cours</Text>
+          <Text style={styles.sectionTitle}>Mission en cours</Text>
+          {activeService ? (
             <View style={styles.serviceCard}>
               <View style={styles.serviceHeader}>
                 <View style={styles.serviceBadge}>
                   <Text style={styles.serviceBadgeText}>
-                    {activeService.status === 'accepted' ? 'Accepté' : 'En cours'}
+                    {activeService.status === 'completed'
+                      ? 'Terminée'
+                      : activeService.status === 'accepted'
+                        ? 'Accepté'
+                        : 'En cours'}
                   </Text>
                 </View>
-                <Text style={styles.serviceType}>{activeService.service_type}</Text>
+                <Text style={styles.serviceType}>
+                  {activeService.service_type || 'Mission client'}
+                </Text>
               </View>
               <Text style={styles.serviceDescription}>
-                {activeService.description}
+                {activeService.description || 'Aucune description fournie.'}
               </Text>
               <View style={styles.serviceLocation}>
                 <MapPin color="#666" size={16} />
                 <Text style={styles.serviceLocationText}>
-                  {activeService.location_address}
+                  {activeService.location_address || 'Adresse client indisponible'}
                 </Text>
               </View>
-              <View style={styles.serviceActions}>
-                <TouchableOpacity style={styles.navigateButton}>
-                  <Text style={styles.navigateButtonText}>
-                    Démarrer la navigation
+              <View style={styles.serviceMeta}>
+                <Text style={styles.serviceMetaText}>
+                  Client : {activeService.client_name || 'Client'}
+                </Text>
+                {!!activeService.client_phone && (
+                  <Text style={styles.serviceMetaText}>
+                    Téléphone : {activeService.client_phone}
                   </Text>
+                )}
+                {typeof (activeService as any).distance_km === 'number' && (
+                  <Text style={styles.serviceMetaText}>
+                    Distance estimée : {(activeService as any).distance_km} km
+                  </Text>
+                )}
+                {typeof (activeService as any).estimated_time === 'number' && (
+                  <Text style={styles.serviceMetaText}>
+                    Durée estimée : {(activeService as any).estimated_time} min
+                  </Text>
+                )}
+              </View>
+              <View style={styles.serviceActions}>
+                <TouchableOpacity
+                  style={[styles.navigateButton, navigatingToActiveService && styles.navigateButtonDisabled]}
+                  onPress={handleNavigateToActiveService}
+                  disabled={navigatingToActiveService || activeService.status === 'completed'}
+                >
+                  {navigatingToActiveService ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.navigateButtonText}>
+                      {activeService.status === 'completed' ? 'Mission terminée' : 'Voir la navigation'}
+                    </Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
+          ) : (
+            <View style={[styles.serviceCard, styles.emptyCard]}>
+              <Text style={styles.emptyStateTitle}>Aucune mission en cours</Text>
+              <Text style={styles.emptyStateDescription}>
+                Acceptez une demande de dépannage pour voir les détails de mission ici.
+              </Text>
+            </View>
+          )}
+        </View>
         )}
 
         <View style={styles.section}>
@@ -814,6 +1162,93 @@ export default function MechanicHomeScreen() {
           )}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={notificationsModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleDismissNotifications}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.notificationsModal}>
+            <Text style={styles.modalTitle}>Notifications</Text>
+            <Text style={styles.modalSubtitle}>
+              {pendingNotifications.length} notification{pendingNotifications.length > 1 ? 's' : ''} non lue{pendingNotifications.length > 1 ? 's' : ''}
+            </Text>
+            <FlatList
+              data={pendingNotifications}
+              keyExtractor={(item) => String(item?._id || item?.id || Math.random())}
+              contentContainerStyle={{ gap: 12, paddingVertical: 4 }}
+              renderItem={({ item }) => (
+                <View style={styles.notificationCard}>
+                  <Text style={styles.notificationTitle}>{item?.title || 'Notification'}</Text>
+                  <Text style={styles.notificationContent}>{item?.content || ''}</Text>
+                  {item?.sentAt ? (
+                    <Text style={styles.notificationTime}>
+                      {new Date(item.sentAt).toLocaleString()}
+                    </Text>
+                  ) : null}
+                </View>
+              )}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonSecondary]}
+                onPress={handleDismissNotifications}
+                disabled={markingNotifications}
+              >
+                <Text style={[styles.modalButtonText, styles.modalButtonSecondaryText]}>Fermer</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, markingNotifications && styles.disabledButton]}
+                onPress={handleConfirmNotifications}
+                disabled={markingNotifications}
+              >
+                <Text style={styles.modalButtonText}>
+                  {markingNotifications ? '...' : 'Marquer comme lues'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={complaintsDrawerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeComplaintsDrawer}
+      >
+        <View style={styles.drawerOverlay}>
+          <View style={styles.drawerContainer}>
+            <View style={styles.drawerHeader}>
+              <Text style={styles.drawerTitle}>Signalements clients</Text>
+              <TouchableOpacity onPress={closeComplaintsDrawer}>
+                <Text style={styles.drawerClose}>Fermer</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.drawerSubtitle}>
+              Retrouvez ici les signalements reçus. Les nouveaux restent en gras jusqu'à lecture.
+            </Text>
+            {loadingComplaints ? (
+              <View style={styles.drawerLoading}>
+                <ActivityIndicator size="large" color="#0A1F44" />
+              </View>
+            ) : complaints.length === 0 ? (
+              <View style={styles.drawerEmptyState}>
+                <Text style={styles.drawerEmptyText}>Aucun signalement pour le moment.</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={complaints}
+                keyExtractor={(item) => String(item?._id || item?.id || Math.random())}
+                renderItem={renderComplaintItem}
+                contentContainerStyle={styles.drawerList}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Bouton flottant pour la messagerie */}
       <TouchableOpacity
@@ -1167,12 +1602,192 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   emptyState: {
-    padding: 40,
+    padding: 32,
     alignItems: 'center',
   },
   emptyStateText: {
     fontSize: 14,
-    color: '#666',
+    color: '#707070',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  notificationsModal: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    maxHeight: '75%',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0A1F44',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#475569',
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  notificationCard: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: '#F8FAFC',
+  },
+  notificationTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  notificationContent: {
+    fontSize: 13,
+    color: '#1E293B',
+    marginBottom: 6,
+  },
+  notificationTime: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 16,
+  },
+  modalButton: {
+    minWidth: 120,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0A1F44',
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalButtonSecondary: {
+    backgroundColor: '#E2E8F0',
+  },
+  modalButtonSecondaryText: {
+    color: '#1F2937',
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
+  drawerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'flex-end',
+  },
+  drawerContainer: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 32,
+    maxHeight: '80%',
+  },
+  drawerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  drawerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0A1F44',
+  },
+  drawerClose: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2563EB',
+  },
+  drawerSubtitle: {
+    fontSize: 13,
+    color: '#475569',
+    marginBottom: 16,
+  },
+  drawerLoading: {
+    paddingVertical: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerEmptyState: {
+    paddingVertical: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerEmptyText: {
+    fontSize: 14,
+    color: '#64748B',
+  },
+  drawerList: {
+    paddingBottom: 16,
+    gap: 12,
+  },
+  complaintItem: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 16,
+    backgroundColor: '#F8FAFC',
+    marginBottom: 12,
+  },
+  complaintHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  complaintTitleWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  complaintStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  complaintStatusDotUnread: {
+    backgroundColor: '#DC2626',
+  },
+  complaintStatusDotRead: {
+    backgroundColor: '#CBD5F5',
+  },
+  complaintTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  complaintTitleUnread: {
+    fontWeight: '800',
+  },
+  complaintDate: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  complaintMessage: {
+    fontSize: 14,
+    color: '#1F2937',
+    marginBottom: 6,
+  },
+  complaintMessageUnread: {
+    fontWeight: '600',
+  },
+  complaintDest: {
+    fontSize: 12,
+    color: '#475569',
   },
   floatingButton: {
     position: 'absolute',

@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import Breakdown from '../models/Breakdown.js';
 import { buildCrudRouter, crudHandlers } from '../utils/crud.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -30,13 +31,17 @@ const emitBreakdownCreated = async (breakdown: any) => {
 
     io.emit('breakdown_created', populated);
 
-    if (populated?.latitude != null && populated?.longitude != null) {
+    if (typeof populated?.latitude === 'number' && typeof populated?.longitude === 'number') {
       const mechanics = await Mechanic.find({ latitude: { $ne: null }, longitude: { $ne: null }, available: { $ne: false } })
         .populate({ path: 'user', select: 'firstName lastName phoneNumber pushToken' })
         .lean();
 
       mechanics.forEach((m: any) => {
-        const d = distanceKm({ lat: populated.latitude, lng: populated.longitude }, { lat: m.latitude, lng: m.longitude });
+        const mechLat = typeof m?.latitude === 'number' ? m.latitude : null;
+        const mechLng = typeof m?.longitude === 'number' ? m.longitude : null;
+        if (mechLat == null || mechLng == null) return;
+
+        const d = distanceKm({ lat: populated.latitude, lng: populated.longitude }, { lat: mechLat, lng: mechLng });
         if (d <= 25) {
           io.to(`user_${m.user?._id || m.user}`).emit('breakdown_nearby', {
             breakdown: populated,
@@ -55,6 +60,44 @@ const emitBreakdownCreated = async (breakdown: any) => {
   }
 };
 
+const emitBreakdownCompleted = async (breakdownId: string) => {
+  try {
+    const io = getIO();
+    if (!io) return;
+
+    const populated = await Breakdown.findById(breakdownId)
+      .populate({
+        path: 'client',
+        populate: { path: 'user', select: 'firstName lastName phoneNumber profilePhoto' },
+      })
+      .populate({
+        path: 'mechanic',
+        populate: { path: 'user', select: 'firstName lastName phoneNumber profilePhoto pushToken' },
+      })
+      .lean();
+
+    if (!populated) return;
+
+    const mechanicDoc: any = populated.mechanic as any;
+    const clientDoc: any = populated.client as any;
+    const mechanicUserId = mechanicDoc?.user?._id || mechanicDoc?.user;
+    const clientUserId = clientDoc?.user?._id || clientDoc?.user;
+
+    const payload = {
+      breakdown: populated,
+    };
+
+    if (mechanicUserId) {
+      io.to(`user_${mechanicUserId}`).emit('breakdown_completed', payload);
+    }
+    if (clientUserId) {
+      io.to(`user_${clientUserId}`).emit('breakdown_completed', payload);
+    }
+  } catch (error) {
+    console.error('Error emitting breakdown_completed event:', error);
+  }
+};
+
 const emitBreakdownAssigned = async (breakdownId: string) => {
   try {
     const io = getIO();
@@ -67,23 +110,20 @@ const emitBreakdownAssigned = async (breakdownId: string) => {
 
     if (!populated?.client || !populated?.mechanic) return;
 
-    const clientUserId = populated.client?.user?._id || populated.client?.user;
+    const clientDoc: any = populated.client as any;
+    const mechanicDoc: any = populated.mechanic as any;
+    const clientUserId = clientDoc?.user?._id || clientDoc?.user;
     if (!clientUserId) return;
 
-    const mechanicUserId = populated.mechanic?.user?._id || populated.mechanic?.user;
-    const mechanicLat = populated.mechanic?.latitude;
-    const mechanicLng = populated.mechanic?.longitude;
+    const mechanicUserId = mechanicDoc?.user?._id || mechanicDoc?.user;
+    const mechanicLat = typeof mechanicDoc?.latitude === 'number' ? mechanicDoc.latitude : null;
+    const mechanicLng = typeof mechanicDoc?.longitude === 'number' ? mechanicDoc.longitude : null;
     const clientLat = populated.latitude;
     const clientLng = populated.longitude;
 
     let distance = null;
     let etaMinutes = null;
-    if (
-      typeof mechanicLat === 'number' &&
-      typeof mechanicLng === 'number' &&
-      typeof clientLat === 'number' &&
-      typeof clientLng === 'number'
-    ) {
+    if (mechanicLat != null && mechanicLng != null && typeof clientLat === 'number' && typeof clientLng === 'number') {
       distance = distanceKm({ lat: mechanicLat, lng: mechanicLng }, { lat: clientLat, lng: clientLng });
       const avgSpeedKmH = 30;
       etaMinutes = Math.max(2, Math.round((distance / avgSpeedKmH) * 60));
@@ -92,9 +132,9 @@ const emitBreakdownAssigned = async (breakdownId: string) => {
     await Notification.create({
       user: clientUserId,
       title: 'Mécanicien assigné',
-      content: `Un mécanicien se rend vers vous: ${[populated.mechanic?.user?.firstName, populated.mechanic?.user?.lastName]
-        .filter(Boolean)
-        .join(' ') || 'Mécanicien'}.`,
+      content: `Un mécanicien se rend vers vous: ${
+        [mechanicDoc?.user?.firstName, mechanicDoc?.user?.lastName].filter(Boolean).join(' ') || 'Mécanicien'
+      }.`,
       type: 'assignment',
     });
 
@@ -112,13 +152,163 @@ const emitBreakdownAssigned = async (breakdownId: string) => {
 
 const breakdownHandlers = crudHandlers(Breakdown, 'Breakdown');
 
+const normalizeServiceStatus = (status: string) => {
+  if (status === 'open') return 'pending';
+  if (status === 'closed') return 'completed';
+  return status;
+};
+
+const makeFullName = (user: any) =>
+  user ? [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined : undefined;
+
+const syncBreakdownToService = async (breakdownId: string) => {
+  try {
+    const servicesCollection = mongoose.connection?.db?.collection('services');
+    if (!servicesCollection) return;
+
+    const populated = await Breakdown.findById(breakdownId)
+      .populate({
+        path: 'client',
+        populate: { path: 'user', select: 'firstName lastName phoneNumber address' },
+      })
+      .populate({
+        path: 'mechanic',
+        populate: { path: 'user', select: 'firstName lastName phoneNumber latitude longitude' },
+      })
+      .lean();
+
+    if (!populated) return;
+
+    const existing = await servicesCollection.findOne({ _id: populated._id });
+    const nowIso = new Date().toISOString();
+    const normalizedStatus = normalizeServiceStatus(populated.status);
+
+    const clientDocId = populated.client ? String((populated.client as any)._id || populated.client) : '';
+    const mechanicDocId = populated.mechanic ? String((populated.mechanic as any)._id || populated.mechanic) : null;
+
+    const clientUser = (populated.client as any)?.user;
+    const mechanicUser = (populated.mechanic as any)?.user;
+
+    const serviceTypeCandidate =
+      (populated as any).serviceType ||
+      (populated as any).service_type ||
+      (populated as any).category ||
+      (populated as any).type;
+
+    const clientDoc: any = populated.client;
+    const mechanicDoc: any = populated.mechanic;
+
+    let locationAddress =
+      (populated as any).locationAddress ||
+      (populated as any).address ||
+      existing?.location_address ||
+      clientDoc?.address ||
+      '';
+
+    if (!locationAddress && typeof populated.latitude === 'number' && typeof populated.longitude === 'number') {
+      locationAddress = `${populated.latitude.toFixed(4)}, ${populated.longitude.toFixed(4)}`;
+    }
+
+    const servicePayload: Record<string, any> = {
+      client_id: clientDocId,
+      mechanic_id: mechanicDocId,
+      client_name: makeFullName(clientUser) || existing?.client_name,
+      client_phone: clientUser?.phoneNumber || existing?.client_phone,
+      mechanic_name: makeFullName(mechanicUser) || existing?.mechanic_name,
+      mechanic_phone: mechanicUser?.phoneNumber || existing?.mechanic_phone,
+      service_type:
+        serviceTypeCandidate ||
+        (populated.description ? `Assistance - ${populated.description.slice(0, 40)}` : undefined) ||
+        existing?.service_type ||
+        'Dépannage automobile',
+      status: normalizedStatus,
+      location_lat: populated.latitude ?? null,
+      location_lng: populated.longitude ?? null,
+      client_lat: populated.latitude ?? null,
+      client_lng: populated.longitude ?? null,
+      location_address: locationAddress,
+      description: populated.description ?? existing?.description ?? '',
+      distance_km: existing?.distance_km ?? null,
+      estimated_time: existing?.estimated_time ?? null,
+      updated_at: nowIso,
+    };
+
+    if (!servicePayload.client_name) {
+      const client = populated.client as any;
+      if (client) {
+        servicePayload.client_name = makeFullName(client) || existing?.client_name;
+      }
+    }
+
+    if (normalizedStatus === 'in_progress' || normalizedStatus === 'accepted') {
+      servicePayload.accepted_at = existing?.accepted_at ?? nowIso;
+      servicePayload.started_at = existing?.started_at ?? nowIso;
+    }
+    if (normalizedStatus === 'completed') {
+      servicePayload.completed_at = existing?.completed_at ?? nowIso;
+    }
+
+    const mechanicLat = typeof mechanicDoc?.latitude === 'number' ? mechanicDoc.latitude : null;
+    const mechanicLng = typeof mechanicDoc?.longitude === 'number' ? mechanicDoc.longitude : null;
+    if (mechanicLat != null && mechanicLng != null && typeof populated.latitude === 'number' && typeof populated.longitude === 'number') {
+      const dist = distanceKm(
+        { lat: mechanicLat, lng: mechanicLng },
+        { lat: populated.latitude, lng: populated.longitude }
+      );
+      servicePayload.distance_km = Number(dist.toFixed(2));
+      if (normalizedStatus === 'in_progress' || normalizedStatus === 'accepted') {
+        servicePayload.estimated_time = Math.max(2, Math.round((dist / 30) * 60));
+      }
+    }
+
+    if (
+      servicePayload.distance_km == null &&
+      typeof (populated as any).distanceKm === 'number'
+    ) {
+      servicePayload.distance_km = Number((populated as any).distanceKm.toFixed?.(2) ?? (populated as any).distanceKm);
+    }
+
+    if (
+      servicePayload.estimated_time == null &&
+      typeof (populated as any).estimatedDurationMin === 'number'
+    ) {
+      servicePayload.estimated_time = Math.round((populated as any).estimatedDurationMin);
+    }
+
+    Object.keys(servicePayload).forEach((key) => {
+      if (servicePayload[key] === undefined) {
+        delete servicePayload[key];
+      }
+    });
+
+    const createdAtIso =
+      existing?.created_at ||
+      (populated.createdAt ? new Date(populated.createdAt).toISOString() : nowIso);
+
+    await servicesCollection.updateOne(
+      { _id: populated._id },
+      {
+        $set: servicePayload,
+        $setOnInsert: {
+          created_at: createdAtIso,
+          id: populated._id.toString(),
+        },
+      },
+      { upsert: true }
+    );
+  } catch (error) {
+    console.error('Failed to sync breakdown to services collection:', error);
+  }
+};
+
 const createWithNotification = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   try {
     const breakdown = await Breakdown.create(req.body);
-    emitBreakdownCreated(breakdown);
+    await emitBreakdownCreated(breakdown);
+    await syncBreakdownToService(String(breakdown._id));
     res.status(201).json(breakdown);
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
 });
 
@@ -139,8 +329,16 @@ breakdownRouter.patch(
       (updates?.status === 'in_progress' || doc.status === 'in_progress') &&
       Boolean(updates?.mechanic || doc.mechanic);
     if (assignedNow) {
-      emitBreakdownAssigned(String(doc._id));
+      await emitBreakdownAssigned(String(doc._id));
     }
+
+    const statusChangedToClosed =
+      typeof updates?.status === 'string' && updates.status === 'closed' && doc.status === 'closed';
+    if (statusChangedToClosed) {
+      await emitBreakdownCompleted(String(doc._id));
+    }
+
+    await syncBreakdownToService(String(doc._id));
 
     res.json(doc);
   }),
@@ -273,6 +471,8 @@ router.post(
       { new: true }
     );
     if (!doc) return res.status(404).json({ message: 'Breakdown not found' });
+    await emitBreakdownAssigned(String(doc._id));
+    await syncBreakdownToService(String(doc._id));
     res.json(doc);
   })
 );
@@ -294,6 +494,8 @@ router.post(
       { new: true }
     );
     if (!doc) return res.status(404).json({ message: 'Breakdown not found' });
+    await emitBreakdownCompleted(String(doc._id));
+    await syncBreakdownToService(String(doc._id));
     res.json(doc);
   })
 );

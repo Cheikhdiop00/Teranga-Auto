@@ -12,7 +12,7 @@ const getApiUrl = () => {
   // Sinon, utiliser l'URL par défaut selon la plateforme
   // Pour Android Emulator: 10.0.2.2
   // Pour appareil physique: utilise l'IP locale de votre machine
-  return 'http://192.168.1.151:3000';
+  return 'http://192.168.1.42:3000';
 };
 
 export const API_URL = getApiUrl();

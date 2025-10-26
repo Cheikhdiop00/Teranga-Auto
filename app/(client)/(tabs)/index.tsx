@@ -121,6 +121,8 @@ export default function ClientHomeScreen() {
   const [reportReasons, setReportReasons] = useState<string[]>([]);
   const [otherReason, setOtherReason] = useState('');
   const [submittingMissionAction, setSubmittingMissionAction] = useState(false);
+  const [ratingPromptVisible, setRatingPromptVisible] = useState(false);
+  const [ratingModalVisible, setRatingModalVisible] = useState(false);
 
   useEffect(() => {
     loadMechanics();
@@ -453,6 +455,8 @@ export default function ClientHomeScreen() {
     setOtherReason('');
     setReportModalVisible(false);
     setSubmittingMissionAction(false);
+    setRatingPromptVisible(false);
+    setRatingModalVisible(false);
   };
 
   const submitRating = useCallback(async () => {
@@ -582,16 +586,17 @@ export default function ClientHomeScreen() {
               <TouchableOpacity
                 style={[styles.continueButton, submittingMissionAction && styles.disabledButton]}
                 disabled={submittingMissionAction}
-                onPress={() => {
-                  setMissionModalVisible(false);
-                }}
+                onPress={() => setMissionModalVisible(false)}
               >
                 <Text style={styles.continueButtonText}>Fermer</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.completeButton, submittingMissionAction && styles.disabledButton]}
                 disabled={submittingMissionAction}
-                onPress={submitRating}
+                onPress={() => {
+                  setMissionModalVisible(false);
+                  setRatingPromptVisible(true);
+                }}
               >
                 <Text style={styles.completeButtonText}>Terminer</Text>
               </TouchableOpacity>
@@ -600,26 +605,8 @@ export default function ClientHomeScreen() {
                 disabled={submittingMissionAction}
                 onPress={() => setReportModalVisible(true)}
               >
-                <Text style={styles.cancelButtonText}>Annuler</Text>
+                <Text style={styles.cancelButtonText}>Signalement</Text>
               </TouchableOpacity>
-            </View>
-
-            <View style={styles.ratingSection}>
-              <Text style={styles.sectionSubtitle}>Votre note</Text>
-              <View style={styles.starsRow}>
-                {[1, 2, 3, 4, 5].map((value) => (
-                  <TouchableOpacity key={value} onPress={() => setRatingValue(value)}>
-                    <Text style={[styles.star, value <= ratingValue ? styles.starActive : styles.starInactive]}>★</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <TextInput
-                style={styles.commentInput}
-                placeholder="Commentaire (optionnel)"
-                value={ratingComment}
-                onChangeText={setRatingComment}
-                multiline
-              />
             </View>
           </View>
         </View>
@@ -669,6 +656,74 @@ export default function ClientHomeScreen() {
               style={[styles.completeButton, submittingMissionAction && styles.disabledButton]}
               disabled={submittingMissionAction}
               onPress={submitReport}
+            >
+              <Text style={styles.completeButtonText}>Envoyer</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderRatingPrompt = () => (
+    <Modal visible={ratingPromptVisible && !!activeMission} transparent animationType="fade" onRequestClose={() => setRatingPromptVisible(false)}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.promptModal}>
+          <Text style={styles.modalTitle}>Merci d'avoir utilisé TerangaAuto</Text>
+          <Text style={styles.modalSubtitle}>Souhaitez-vous laisser une note pour ce mécanicien ?</Text>
+          <View style={styles.promptActions}>
+            <TouchableOpacity
+              style={[styles.cancelButton, styles.promptButton]}
+              onPress={resetMissionState}
+            >
+              <Text style={styles.cancelButtonText}>Plus tard</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.completeButton, styles.promptButton]}
+              onPress={() => {
+                setRatingPromptVisible(false);
+                setRatingModalVisible(true);
+              }}
+            >
+              <Text style={styles.completeButtonText}>Noter</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderRatingModal = () => (
+    <Modal visible={ratingModalVisible && !!activeMission} transparent animationType="fade" onRequestClose={() => setRatingModalVisible(false)}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.ratingModal}>
+          <Text style={styles.modalTitle}>Votre avis</Text>
+          <Text style={styles.modalSubtitle}>Quelle note souhaitez-vous attribuer ?</Text>
+          <View style={styles.starsRow}>
+            {[1, 2, 3, 4, 5].map((value) => (
+              <TouchableOpacity key={value} onPress={() => setRatingValue(value)}>
+                <Text style={[styles.star, value <= ratingValue ? styles.starActive : styles.starInactive]}>★</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TextInput
+            style={styles.commentInput}
+            placeholder="Commentaire (optionnel)"
+            value={ratingComment}
+            onChangeText={setRatingComment}
+            multiline
+          />
+          <View style={styles.promptActions}>
+            <TouchableOpacity
+              style={[styles.cancelButton, styles.promptButton]}
+              onPress={resetMissionState}
+            >
+              <Text style={styles.cancelButtonText}>Annuler</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.completeButton, styles.promptButton, submittingMissionAction && styles.disabledButton]}
+              disabled={submittingMissionAction}
+              onPress={submitRating}
             >
               <Text style={styles.completeButtonText}>Envoyer</Text>
             </TouchableOpacity>
@@ -935,6 +990,8 @@ export default function ClientHomeScreen() {
       </Modal>
       {renderMissionModal()}
       {renderReportModal()}
+      {renderRatingPrompt()}
+      {renderRatingModal()}
     </View>
   );
 }
@@ -1296,11 +1353,42 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  ratingHint: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: '#EEF2FF',
+  },
+  ratingHintText: {
+    fontSize: 13,
+    color: '#312E81',
+    textAlign: 'center',
+  },
+  promptModal: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    gap: 16,
+    width: '90%',
+    maxWidth: 420,
+  },
+  ratingModal: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    gap: 16,
+    width: '90%',
+    maxWidth: 420,
+  },
+  promptActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  promptButton: {
+    flex: 1,
+  },
   disabledButton: {
     opacity: 0.6,
-  },
-  ratingSection: {
-    gap: 10,
   },
   sectionSubtitle: {
     fontSize: 16,
