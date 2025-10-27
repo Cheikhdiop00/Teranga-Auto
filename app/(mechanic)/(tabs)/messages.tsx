@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/config/api';
-import { SwipeableRow } from '../../../components/SwipeableRow';
 
 // Types
 type Conversation = {
@@ -145,21 +144,12 @@ export default function MechanicMessagesScreen() {
     { id: '3', text: 'J\'ai un problème de freins qui grincent.', isMe: false, time: '10:33' },
   ]);
 
-  const handleDeleteMessage = (messageId: string) => {
-    setMessages(prevMessages => prevMessages.filter(msg => msg.id !== messageId));
-  };
-
   const renderMessageItem: ListRenderItem<Message> = ({ item }) => (
-    <SwipeableRow 
-      onDelete={() => handleDeleteMessage(item.id)}
-      enabled={item.isMe} // Permet le balayage uniquement pour les messages de l'utilisateur
-    >
-      <MessageBubble 
-        isMe={item.isMe} 
-        message={item.text} 
-        time={item.time} 
-      />
-    </SwipeableRow>
+    <MessageBubble
+      isMe={item.isMe}
+      message={item.text}
+      time={item.time}
+    />
   );
 
   const renderConversationItem: ListRenderItem<Conversation> = ({ item }) => (

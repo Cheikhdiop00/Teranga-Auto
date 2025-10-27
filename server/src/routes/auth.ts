@@ -142,7 +142,7 @@ router.post(
       password,
       phoneNumber,
       role,
-      status: 'active', // Changé de 'pending' à 'active'
+      status: 'pending', // Changed back to 'pending' to enforce email verification
       profilePhoto
     });
 
@@ -253,8 +253,8 @@ router.post(
       });
     }
 
-    if (user.status !== 'active') {
-      console.log('User status not active:', user.status);
+    if (user.status !== 'active' || !user.emailVerified) {
+      console.log('User not active or email not verified:', { status: user.status, emailVerified: user.emailVerified });
       return res.status(403).json({ 
         success: false,
         message: 'Compte non activé. Veuillez vérifier votre email pour l\'activer.' 
@@ -554,6 +554,7 @@ router.get(
         return res.status(400).json({ message: 'Token invalide ou expiré' });
       }
       user.status = 'active';
+      user.emailVerified = true;
       await user.save();
       res.json({ message: 'Compte activé avec succès. Vous pouvez maintenant vous connecter.' });
     } catch (err) {

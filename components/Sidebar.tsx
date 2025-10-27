@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Switch } from 'react-native';
 import { useTheme } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { History, AlertTriangle, Sun, Moon, Info, LogOut, X } from 'lucide-react-native';
+import { History, AlertTriangle, Sun, Moon, LogOut, X } from 'lucide-react-native';
 
 type SidebarProps = {
   isVisible: boolean;
@@ -16,6 +16,7 @@ export default function Sidebar({ isVisible, onClose, isDarkMode, toggleTheme }:
   const { colors } = useTheme();
   const router = useRouter();
   const { signOut } = useAuth();
+  
 
   if (!isVisible) return null;
 
@@ -57,15 +58,6 @@ export default function Sidebar({ isVisible, onClose, isDarkMode, toggleTheme }:
       ),
     },
     {
-      id: 'about',
-      icon: <Info size={24} color={colors.text} />,
-      label: 'À propos',
-      onPress: () => {
-        onClose();
-        router.push('/(mechanic)/about');
-      },
-    },
-    {
       id: 'logout',
       icon: <LogOut size={24} color="#ff3b30" />,
       label: 'Déconnexion',
@@ -78,7 +70,9 @@ export default function Sidebar({ isVisible, onClose, isDarkMode, toggleTheme }:
   return (
     <View style={[styles.container, { backgroundColor: colors.card }]}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>Menu</Text>
+        <View style={styles.headerLeft}>
+          <Text style={[styles.title, { color: colors.text }]}>Menu</Text>
+        </View>
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
           <X size={24} color={colors.text} />
         </TouchableOpacity>
@@ -114,16 +108,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 20,
     left: 0,
-    bottom: 20,
-    width: '60%',
-    maxWidth: 250,
-    borderRadius: 15,
+    right: 0,
+    bottom: 0,
     zIndex: 1000,
     elevation: 5,
     shadowColor: '#000',
-    shadowOffset: { width: 2, height: 0 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
-    shadowRadius: 5,
+    shadowRadius: 3.84,
+    borderTopRightRadius: 20,
+    borderBottomRightRadius: 20,
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
@@ -131,6 +126,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  notificationBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+  },
+  notificationText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   title: {
     fontSize: 20,

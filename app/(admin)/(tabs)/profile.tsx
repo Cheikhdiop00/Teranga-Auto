@@ -276,7 +276,7 @@ export default function AdminProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#ffffffff',
   },
   header: {
     paddingTop: 60,
@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#ffffffff',
     textAlign: 'center',
   },
   backButton: {

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Alert, Switch, useColorScheme } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Alert, Switch, useColorScheme, FlatList } from 'react-native';
 import { useEffect } from 'react';
 import { Menu, Bell, MessageCircle, Search, MapPin } from 'lucide-react-native';
 import Sidebar from '@/components/Sidebar';
@@ -6,6 +6,10 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCollection } from '@/lib/supabase';
 import { Service } from '@/types/database';
+import { API_BASE_URL, API_URL } from '@/config/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Linking } from 'react-native';
+import { io, Socket } from 'socket.io-client';
 
 export default function MechanicHomeScreen() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -24,10 +28,45 @@ export default function MechanicHomeScreen() {
   const [isAvailable, setIsAvailable] = useState(profile?.is_available || false);
   const [pendingServices, setPendingServices] = useState<Service[]>([]);
   const [activeService, setActiveService] = useState<Service | null>(null);
+  const [ads, setAds] = useState<any[]>([]);
 
   useEffect(() => {
     loadServices();
+    loadAds();
   }, []);
+
+  // Real-time: refresh ads on server push
+  useEffect(() => {
+    let socket: Socket | null = null;
+    (async () => {
+      try {
+        const token = await AsyncStorage.getItem('authToken');
+        socket = io(API_URL, { auth: { token } });
+        socket.on('ads_updated', () => {
+          loadAds();
+        });
+      } catch {}
+    })();
+    return () => {
+      try { socket?.disconnect(); } catch {}
+    };
+  }, []);
+
+  const loadAds = async () => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(`${API_BASE_URL}/ads`, { headers });
+      if (response.ok) {
+        const payload = await response.json();
+        const list = Array.isArray(payload.data) ? payload.data : [];
+        setAds(list);
+      }
+    } catch (error) {
+      console.error('Error loading ads:', error);
+    }
+  };
 
   const loadServices = async () => {
     try {
@@ -157,6 +196,37 @@ export default function MechanicHomeScreen() {
           </View>
         </View>
 
+        {/* Promotions */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Promotions</Text>
+          <FlatList
+            horizontal
+            data={ads}
+            keyExtractor={(item) => item._id || item.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity style={styles.adCard} onPress={() => item.targetUrl && Linking.openURL(item.targetUrl)}>
+                {item.imageUrl ? (
+                  <Image source={{ uri: item.imageUrl }} style={styles.adCardImage} />
+                ) : (
+                  <View style={styles.adCardPlaceholder}>
+                    <Text style={styles.adCardPlaceholderText}>Image</Text>
+                  </View>
+                )}
+                <View style={styles.adCardContent}>
+                  <Text style={styles.adCardTitle} numberOfLines={2}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.adCardDescription} numberOfLines={2}>
+                    {item.description}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.adsList}
+          />
+        </View>
+
         {activeService && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Mission en cours</Text>
@@ -236,7 +306,7 @@ export default function MechanicHomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -455,5 +525,51 @@ const styles = StyleSheet.create({
   emptyStateText: {
     fontSize: 14,
     color: '#666',
+  },
+  adCard: {
+    width: 280,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginRight: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  adCardImage: {
+    width: '100%',
+    height: 120,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+  },
+  adCardPlaceholder: {
+    width: '100%',
+    height: 120,
+    backgroundColor: '#F5F5F5',
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  adCardPlaceholderText: {
+    color: '#999',
+    fontSize: 14,
+  },
+  adCardContent: {
+    padding: 12,
+  },
+  adCardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+    color: '#333',
+  },
+  adCardDescription: {
+    fontSize: 14,
+    color: '#666',
+  },
+  adsList: {
+    paddingLeft: 16,
   },
 });

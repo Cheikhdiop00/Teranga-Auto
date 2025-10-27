@@ -1,19 +1,56 @@
 import { Router } from 'express';
-import Notification from '../models/Notification.js';
-import { buildCrudRouter } from '../utils/crud.js';
+import { requireAuth } from '../middlewares/auth.js';
+import * as notificationController from '../controllers/notificationController.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import mongoose from 'mongoose';
 
 const router = Router();
+
+// Protéger toutes les routes avec l'authentification
+router.use(requireAuth);
 
 /**
  * @openapi
  * tags:
  *   name: Notifications
- *   description: Notifications utilisateur
+ *   description: Gestion des notifications utilisateur
  */
 
-router.use('/', buildCrudRouter(Notification, 'Notification'));
+/**
+ * @openapi
+ * /api/notifications:
+ *   get:
+ *     tags: [Notifications]
+ *     summary: Récupérer les notifications de l'utilisateur
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Numéro de la page
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Nombre d'éléments par page
+ *     responses:
+ *       200:
+ *         description: Liste des notifications
+ */
+router.get('/', asyncHandler(notificationController.getNotifications));
+
+/**
+ * @openapi
+ * /api/notifications/unread/count:
+ *   get:
+ *     tags: [Notifications]
+ *     summary: Récupérer le nombre de notifications non lues
+ *     responses:
+ *       200:
+ *         description: Nombre de notifications non lues
+ */
+router.get('/unread/count', asyncHandler(notificationController.getUnreadCount));
 
 /**
  * @openapi
@@ -21,17 +58,31 @@ router.use('/', buildCrudRouter(Notification, 'Notification'));
  *   patch:
  *     tags: [Notifications]
  *     summary: Marquer une notification comme lue
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la notification
+ *     responses:
+ *       200:
+ *         description: Notification marquée comme lue
+ *       404:
+ *         description: Notification non trouvée
  */
-router.patch(
-  '/:id/read',
-  asyncHandler(async (req, res) => {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ message: 'Invalid notification ID' });
-    }
-    const doc = await Notification.findByIdAndUpdate(req.params.id, { read: true }, { new: true });
-    if (!doc) return res.status(404).json({ message: 'Notification not found' });
-    res.json(doc);
-  })
-);
+router.patch('/:id/read', asyncHandler(notificationController.markAsRead));
+
+/**
+ * @openapi
+ * /api/notifications/read-all:
+ *   patch:
+ *     tags: [Notifications]
+ *     summary: Marquer toutes les notifications comme lues
+ *     responses:
+ *       200:
+ *         description: Toutes les notifications ont été marquées comme lues
+ */
+router.patch('/read-all', asyncHandler(notificationController.markAllAsRead));
 
 export default router;

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import Ad from '../models/Ad.js';
+import { getIO } from '../socket.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
 export const createAd = asyncHandler(async (req: any, res: Response) => {
@@ -22,6 +23,7 @@ export const createAd = asyncHandler(async (req: any, res: Response) => {
     success: true,
     data: ad
   });
+  try { getIO().emit('ads_updated', { action: 'create', id: ad._id }); } catch {}
 });
 
 export const updateAd = asyncHandler(async (req: any, res: Response) => {
@@ -65,6 +67,7 @@ export const updateAd = asyncHandler(async (req: any, res: Response) => {
     success: true,
     data: updatedAd
   });
+  try { getIO().emit('ads_updated', { action: 'update', id }); } catch {}
 });
 
 export const getAds = asyncHandler(async (req: any, res: Response) => {
@@ -143,6 +146,7 @@ export const deleteAd = asyncHandler(async (req: any, res: Response) => {
     success: true,
     data: {}
   });
+  try { getIO().emit('ads_updated', { action: 'delete', id: req.params.id }); } catch {}
 });
 
 export const getAdminAds = asyncHandler(async (req: any, res: Response) => {

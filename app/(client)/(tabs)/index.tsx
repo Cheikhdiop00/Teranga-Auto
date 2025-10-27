@@ -11,6 +11,8 @@ import {
   Easing,
   FlatList,
   Linking,
+  Image,
+  Dimensions,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -30,7 +32,8 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '@/config/api';
+import { API_BASE_URL, API_URL } from '@/config/api';
+import { io, Socket } from 'socket.io-client';
 import { Profile } from '@/types/database';
 
 const MECHANIC_TYPES = [
@@ -44,6 +47,10 @@ const MECHANIC_TYPES = [
   { icon: Battery, label: 'Vitrage', color: '#FFCC00' },
 ];
 
+const AD_CARD_WIDTH = 280;
+const AD_CARD_SPACING = 12;
+const SIDE_PADDING = (Dimensions.get('window').width - AD_CARD_WIDTH) / 2;
+
 export default function ClientHomeScreen() {
   const { profile } = useAuth();
   const [mechanics, setMechanics] = useState<Profile[]>([]);
@@ -52,19 +59,46 @@ export default function ClientHomeScreen() {
   const servicesAnimation = useRef(new Animated.Value(0)).current;
   const [locationText, setLocationText] = useState<string>('');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [ads, setAds] = useState<any[]>([]);
+
+  const loadAds = async () => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const response = await fetch(`${API_BASE_URL}/ads`, { headers });
+      if (response.ok) {
+        const payload = await response.json();
+        const list = Array.isArray(payload.data) ? payload.data : [];
+        setAds(list);
+      }
+    } catch (error) {
+      console.error('Error loading ads:', error);
+    }
+  };
 
   useEffect(() => {
     loadMechanics();
+    loadAds();
   }, [selectedType]);
 
+  // Real-time: refresh ads on server push
   useEffect(() => {
-    Animated.timing(servicesAnimation, {
-      toValue: 1,
-      duration: 500,
-      easing: Easing.out(Easing.ease),
-      useNativeDriver: true,
-    }).start();
-  }, [servicesAnimation]);
+    let socket: Socket | null = null;
+    (async () => {
+      try {
+        const token = await AsyncStorage.getItem('authToken');
+        socket = io(API_URL, { auth: { token } });
+        socket.on('ads_updated', () => {
+          loadAds();
+        });
+      } catch {}
+    })();
+    return () => {
+      try { socket?.disconnect(); } catch {}
+    };
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -127,7 +161,7 @@ export default function ClientHomeScreen() {
       const headers: any = { 'Content-Type': 'application/json' };
       if (token) headers.Authorization = `Bearer ${token}`;
 
-      const listRes = await fetch(`${API_URL}/api/clients`, { headers });
+      const listRes = await fetch(`${API_BASE_URL}/clients`, { headers });
       if (!listRes.ok) return;
       const clients = await listRes.json();
       // Trouver le document client dont le champ user correspond à l'utilisateur courant
@@ -136,7 +170,7 @@ export default function ClientHomeScreen() {
       if (!me || !me._id) return;
 
       // Mettre à jour latitude/longitude et adresse
-      await fetch(`${API_URL}/api/clients/${me._id}`, {
+      await fetch(`${API_BASE_URL}/clients/${me._id}`, {
         method: 'PATCH',
         headers,
         body: JSON.stringify({ latitude, longitude, ...(address ? { address } : {}) }),
@@ -232,6 +266,40 @@ export default function ClientHomeScreen() {
             Trouvez un mécanicien près de chez vous
           </Text>
         </View>
+
+        {ads.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Publicité</Text>
+            <FlatList
+              data={ads}
+              keyExtractor={(item) => item._id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ ...styles.adsList, paddingHorizontal: SIDE_PADDING }}
+              snapToAlignment="center"
+              decelerationRate="fast"
+              snapToInterval={AD_CARD_WIDTH + AD_CARD_SPACING}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.adCard}
+                  activeOpacity={0.9}
+                  onPress={() => item.targetUrl && Linking.openURL(item.targetUrl)}
+                >
+                  {item.imageUrl ? (
+                    <Image source={{ uri: item.imageUrl }} style={styles.adImageBg} resizeMode="cover" />
+                  ) : null}
+                  <View style={styles.adOverlay} />
+                  <View style={styles.adContent}> 
+                    <Text style={styles.adTitleOverlay} numberOfLines={1}>{item.title}</Text>
+                    {!!item.description && (
+                      <Text style={styles.adDescriptionOverlay} numberOfLines={2}>{item.description}</Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        )}
 
         <Animated.View
           style={[
@@ -360,7 +428,7 @@ export default function ClientHomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -555,5 +623,61 @@ const styles = StyleSheet.create({
   emptyStateText: {
     fontSize: 14,
     color: '#666',
+  },
+  locationPill: {
+    backgroundColor: '#F0F0F0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginTop: 4,
+  },
+  locationPillText: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  adsList: {
+    paddingHorizontal: 16,
+  },
+  adCard: {
+    width: 280,
+    height: 155,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  adImageBg: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+  },
+  adOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.35)'
+  },
+  adContent: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+  },
+  adTitleOverlay: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  adDescriptionOverlay: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    opacity: 0.9,
   },
 });
