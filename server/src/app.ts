@@ -1,10 +1,14 @@
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
+import path from 'path';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger.js';
-import router from './routes/index.js';
+import adminRouter from './routes/admin.js';
+import aiRouter from './routes/ai.js';
 import messageRoutes from './routes/messages.js';
+import router from './routes/index.js';
+import uploadRouter from './routes/upload.js';
 import { notFound, errorHandler } from './middlewares/error.js';
 import { initSocket } from './socket.js';
 
@@ -40,6 +44,7 @@ export function createApp() {
   }));
   app.use(express.json({ limit: '10mb' })); // Augmenté pour les fichiers
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
   app.use(morgan('dev'));
 
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
@@ -47,6 +52,8 @@ export function createApp() {
   app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
   app.use('/api', router);
+  app.use(uploadRouter);
+  app.use('/api/ai', aiRouter);
   app.use('/api/messages', messageRoutes);
 
   app.use(notFound);

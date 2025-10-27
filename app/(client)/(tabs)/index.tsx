@@ -30,6 +30,13 @@ import {
   Disc,
   Shield,
   ChevronRight,
+  MapPin,
+  Star,
+  Phone,
+  Mail,
+  Navigation,
+  Board,
+  UserRound,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'expo-router';
@@ -139,36 +146,77 @@ export default function ClientHomeScreen() {
 
   useEffect(() => {
     (async () => {
+      const applyPosition = async (latitude: number, longitude: number) => {
+        setCoords({ lat: latitude, lng: longitude });
+        let label = `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`;
+        let address: string | undefined;
+        try {
+          const places = await Location.reverseGeocodeAsync({ latitude, longitude });
+          if (places && places.length > 0) {
+            const p = places[0];
+            const city = p.city || p.subregion || p.region || '';
+            const country = p.country || '';
+            const composed = [city, country].filter(Boolean).join(', ');
+            if (composed) {
+              label = composed;
+              address = composed;
+            }
+          }
+        } catch {
+          // Ignorer les erreurs de géocodage inversé
+        }
+        setLocationText(label);
+        await saveLocation({
+          latitude,
+          longitude,
+          address,
+        });
+      };
+
+      const fallbackToLastKnown = async () => {
+        try {
+          const last = await Location.getLastKnownPositionAsync();
+          if (last?.coords) {
+            await applyPosition(last.coords.latitude, last.coords.longitude);
+            return true;
+          }
+        } catch {
+          // Ignorer les erreurs de récupération de la dernière position connue
+        }
+        return false;
+      };
+
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
           setLocationText('Localisation désactivée');
           return;
         }
+
+        const servicesEnabled = await Location.hasServicesEnabledAsync();
+        if (!servicesEnabled) {
+          const usedLast = await fallbackToLastKnown();
+          if (!usedLast) {
+            setLocationText('Activez le GPS.');
+          }
+          return;
+        }
+
         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        const places = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-        if (places && places.length > 0) {
-          const p = places[0];
-          const city = p.city || p.subregion || p.region || '';
-          const country = p.country || '';
-          const label = [city, country].filter(Boolean).join(', ');
-          setLocationText(label || `${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`);
-          await saveLocation({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            address: label,
-          });
-        } else {
-          setLocationText(`${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`);
-          await saveLocation({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            address: undefined,
-          });
+        if (pos?.coords) {
+          await applyPosition(pos.coords.latitude, pos.coords.longitude);
+          return;
+        }
+
+        const usedLast = await fallbackToLastKnown();
+        if (!usedLast) {
+          setLocationText('Localisation indisponible');
         }
       } catch {
-        setLocationText('Localisation indisponible');
+        const usedLast = await fallbackToLastKnown();
+        if (!usedLast) {
+          setLocationText('Localisation indisponible');
+        }
       }
     })();
   }, []);
@@ -258,6 +306,12 @@ export default function ClientHomeScreen() {
         return fallback ?? '';
       };
 
+      const normalizeList = (value: any): string[] => {
+        if (Array.isArray(value)) return value.map((v) => String(v));
+        if (typeof value === 'string' && value.trim()) return value.split(/[,;]+/).map((item) => item.trim());
+        return [];
+      };
+
       let mapped: Profile[] = (Array.isArray(list) ? list : []).map((m: any) => ({
         id: m._id || m.id,
         user_type: 'mechanic',
@@ -267,10 +321,10 @@ export default function ClientHomeScreen() {
         address: m.address || m.user?.address || '',
         photo_url: m.user?.profilePhoto || undefined,
         id_card_number: m.nationalId,
-        specialties: normalizeMechanicSpecialties(m),
+        specialties: normalizeList(m.specialties ?? normalizeMechanicSpecialties(m)),
         is_available: (m.is_available ?? m.available) ?? true,
-        rating_average: m.rating_average ?? 0,
-        rating_count: m.rating_count ?? 0,
+        rating_average: m.rating_average ?? m.reputation ?? 0,
+        rating_count: m.rating_count ?? m.interventionsCount ?? 0,
         latitude: m.latitude ?? 0,
         longitude: m.longitude ?? 0,
         is_blocked: false,
@@ -287,7 +341,11 @@ export default function ClientHomeScreen() {
         );
       }
 
-      mapped.sort((a, b) => (b.rating_average || 0) - (a.rating_average || 0));
+      mapped.sort((a, b) => {
+        const diff = (b.rating_average || 0) - (a.rating_average || 0);
+        if (Math.abs(diff) > 0.01) return diff;
+        return (b.rating_count || 0) - (a.rating_count || 0);
+      });
       setMechanics(mapped);
     } catch (error) {
       console.error('Error loading mechanics:', error);
@@ -701,7 +759,7 @@ export default function ClientHomeScreen() {
           <Text style={styles.modalSubtitle}>Quelle note souhaitez-vous attribuer ?</Text>
           <View style={styles.starsRow}>
             {[1, 2, 3, 4, 5].map((value) => (
-              <TouchableOpacity key={value} onPress={() => setRatingValue(value)}>
+              <TouchableOpacity key={value} onPress={() => setRatingValue(value)} activeOpacity={0.7}>
                 <Text style={[styles.star, value <= ratingValue ? styles.starActive : styles.starInactive]}>★</Text>
               </TouchableOpacity>
             ))}
@@ -739,13 +797,12 @@ export default function ClientHomeScreen() {
         <TouchableOpacity style={styles.headerButton}>
           <Menu color="#000" size={24} />
         </TouchableOpacity>
-      <View style={styles.headerCenter}>
-  <Text style={styles.logo}>TerangaAuto</Text>
-  <TouchableOpacity style={styles.location} onPress={openMap} activeOpacity={0.8}>
-    <Text style={styles.locationPillText}>{locationText || 'Votre position'}</Text>
-   
-  </TouchableOpacity>
-</View>
+        <View style={styles.headerCenter}>
+          <Text style={styles.logo}>TerangaAuto</Text>
+          <TouchableOpacity style={styles.location} onPress={openMap} activeOpacity={0.8}>
+            <Text style={styles.locationPillText}>{locationText || 'Votre position'}</Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerButton}>
             <Bell color="#000" size={24} />
@@ -874,7 +931,14 @@ export default function ClientHomeScreen() {
                       </Text>
                     </View>
                     <Text style={styles.mechanicSpecialties}>
-                      {mechanic.specialties?.join(', ')}
+                      Spécialités :
+                      {' '}
+                      {mechanic.specialties && mechanic.specialties.length > 0
+                        ? mechanic.specialties.join(', ')
+                        : 'Non renseigné'}
+                    </Text>
+                    <Text style={styles.mechanicStatsText}>
+                      Missions réalisées : {mechanic.rating_count}
                     </Text>
                     {mechanic.address ? (
                       <Text style={styles.mechanicAddress}>{mechanic.address}</Text>
@@ -924,13 +988,14 @@ export default function ClientHomeScreen() {
         </View>
       </ScrollView>
 
-      {/* Bouton flottant pour la messagerie */}
+      {/* Bouton flottant pour la messagerie humaine */}
       <TouchableOpacity
         style={[styles.floatingButton, { backgroundColor: '#0A1F44' }]}
-        onPress={() => router.push('/(client)/(tabs)/messages' as any)}
+        onPress={() => router.push('/(client)/support' as any)}
         activeOpacity={0.8}
       >
-        <MessageCircle size={28} color="#22C55E" />
+        <MessageCircle color="#fff" size={22} />
+        <Text style={styles.floatingButtonLabel}>Parler à un agent</Text>
       </TouchableOpacity>
 
       <Modal
@@ -1153,6 +1218,11 @@ const styles = StyleSheet.create({
   mechanicSpecialties: {
     fontSize: 12,
     color: '#666',
+  },
+  mechanicStatsText: {
+    fontSize: 12,
+    color: '#4B5563',
+    marginTop: 2,
   },
   mechanicAddress: {
     fontSize: 12,
@@ -1397,25 +1467,20 @@ const styles = StyleSheet.create({
   },
   starsRow: {
     flexDirection: 'row',
-    gap: 4,
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 12,
   },
   star: {
-    fontSize: 28,
+    fontSize: 32,
+    fontWeight: '700',
+    marginHorizontal: 4,
   },
   starActive: {
     color: '#F59E0B',
   },
   starInactive: {
-    color: '#CBD5F5',
-  },
-  commentInput: {
-    minHeight: 80,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 10,
-    padding: 10,
-    textAlignVertical: 'top',
-    color: '#0F172A',
+    color: '#D1D5DB',
   },
   reportModal: {
     width: '100%',
@@ -1461,16 +1526,22 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 24,
     right: 24,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    justifyContent: 'center',
+    paddingHorizontal: 20,
+    height: 56,
+    borderRadius: 28,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+  },
+  floatingButtonLabel: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
   modalBackdrop: {
     flex: 1,

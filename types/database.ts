@@ -15,6 +15,7 @@ export interface Profile {
   is_available: boolean;
   rating_average: number;
   rating_count: number;
+  missions_completed?: number;
   latitude?: number;
   longitude?: number;
   is_blocked: boolean;

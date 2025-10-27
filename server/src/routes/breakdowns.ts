@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import Breakdown from '../models/Breakdown.js';
+import History from '../models/History.js';
 import { buildCrudRouter, crudHandlers } from '../utils/crud.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import Client from '../models/Client.js';
@@ -160,6 +161,88 @@ const normalizeServiceStatus = (status: string) => {
 
 const makeFullName = (user: any) =>
   user ? [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined : undefined;
+
+const recordHistoryEntry = async (breakdownId: string) => {
+  try {
+    const populated = await Breakdown.findById(breakdownId)
+      .populate({
+        path: 'client',
+        populate: { path: 'user', select: 'firstName lastName phoneNumber address' },
+      })
+      .populate({
+        path: 'mechanic',
+        populate: { path: 'user', select: 'firstName lastName phoneNumber' },
+      })
+      .lean();
+
+    if (!populated?.client || !populated?.mechanic) {
+      return;
+    }
+
+    const clientDoc: any = populated.client;
+    const mechanicDoc: any = populated.mechanic;
+    const clientUser: any = clientDoc?.user;
+    const mechanicUser: any = mechanicDoc?.user;
+
+    const serviceTypeCandidate =
+      (populated as any).serviceType ||
+      (populated as any).service_type ||
+      (populated as any).category ||
+      (populated as any).type ||
+      undefined;
+
+    let locationAddress =
+      (populated as any).locationAddress ||
+      (populated as any).address ||
+      clientDoc?.address ||
+      undefined;
+
+    if (!locationAddress && typeof populated.latitude === 'number' && typeof populated.longitude === 'number') {
+      locationAddress = `${populated.latitude.toFixed(4)}, ${populated.longitude.toFixed(4)}`;
+    }
+
+    const closedAt = populated.closedAt ? new Date(populated.closedAt) : populated.updatedAt ? new Date(populated.updatedAt) : undefined;
+
+    const historyUpdates: Record<string, any> = {
+      client: clientDoc._id,
+      mechanic: mechanicDoc._id,
+      breakdown: populated._id,
+      requestDate: populated.reportedAt || populated.createdAt || new Date(),
+      interventionDate: closedAt,
+      estimatedCost: (populated as any).estimatedCost,
+      serviceType: serviceTypeCandidate,
+      description: populated.description,
+      locationAddress,
+      clientName: makeFullName(clientUser) || makeFullName(clientDoc),
+      mechanicName: makeFullName(mechanicUser) || makeFullName(mechanicDoc),
+      distanceKm:
+        typeof (populated as any).distanceKm === 'number'
+          ? Number((populated as any).distanceKm.toFixed?.(2) ?? (populated as any).distanceKm)
+          : undefined,
+      durationMinutes:
+        typeof (populated as any).estimatedDurationMin === 'number'
+          ? Math.round((populated as any).estimatedDurationMin)
+          : undefined,
+      notes: (populated as any).notes,
+      closedAt,
+      status: 'completed',
+    };
+
+    Object.keys(historyUpdates).forEach((key) => {
+      if (historyUpdates[key] === undefined) {
+        delete historyUpdates[key];
+      }
+    });
+
+    await History.findOneAndUpdate(
+      { breakdown: populated._id },
+      { $set: historyUpdates },
+      { upsert: true, setDefaultsOnInsert: true }
+    );
+  } catch (error) {
+    console.error('Failed to record history entry:', error);
+  }
+};
 
 const syncBreakdownToService = async (breakdownId: string) => {
   try {
@@ -336,6 +419,7 @@ breakdownRouter.patch(
       typeof updates?.status === 'string' && updates.status === 'closed' && doc.status === 'closed';
     if (statusChangedToClosed) {
       await emitBreakdownCompleted(String(doc._id));
+      await recordHistoryEntry(String(doc._id));
     }
 
     await syncBreakdownToService(String(doc._id));
@@ -495,6 +579,7 @@ router.post(
     );
     if (!doc) return res.status(404).json({ message: 'Breakdown not found' });
     await emitBreakdownCompleted(String(doc._id));
+    await recordHistoryEntry(String(doc._id));
     await syncBreakdownToService(String(doc._id));
     res.json(doc);
   })

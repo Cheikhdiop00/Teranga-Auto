@@ -1,12 +1,14 @@
 import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, ScrollView, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'expo-router';
 import { LogOut, User, Phone, MapPin, Wrench, Star, Mail, Lock, Camera } from 'lucide-react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getCollection } from '@/lib/supabase';
+import { API_URL } from '@/config/api';
 
 export default function MechanicProfileScreen() {
   const { profile, signOut, updateProfile, user } = useAuth();
@@ -43,6 +45,41 @@ export default function MechanicProfileScreen() {
     }
   }, [profile, user]);
   const [avatar, setAvatar] = useState(profile?.photo_url || null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  const uploadPhoto = useCallback(async (dataUrl: string) => {
+    try {
+      setUploadingAvatar(true);
+      const token = await AsyncStorage.getItem('authToken');
+      const response = await fetch(`${API_URL}/api/upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ base64: dataUrl }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ message: 'Échec du téléversement.' }));
+        throw new Error(err.message || 'Échec du téléversement.');
+      }
+
+      const payload = await response.json();
+      if (!payload?.url) {
+        throw new Error('Réponse inattendue du serveur.');
+      }
+
+      setAvatar(payload.url);
+      return payload.url as string;
+    } catch (error: any) {
+      console.error('Erreur upload photo:', error);
+      Alert.alert('Photo', error?.message || 'Impossible de téléverser la photo.');
+      return null;
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }, []);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({
@@ -62,13 +99,24 @@ export default function MechanicProfileScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.5,
+      quality: 0.7,
+      base64: true,
     });
 
     if (!result.canceled) {
-      setAvatar(result.assets[0].uri);
-      // Ici, vous devrez implémenter la logique pour uploader l'image vers votre serveur
-      // et mettre à jour l'URL de l'avatar dans la base de données
+      const asset = result.assets[0];
+      try {
+        let base64Data = asset.base64;
+        if (!base64Data) {
+          base64Data = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+        }
+        const mime = asset.mimeType || asset.type || 'image/jpeg';
+        const dataUrl = `data:${mime};base64,${base64Data}`;
+        await uploadPhoto(dataUrl);
+      } catch (error) {
+        console.error('Erreur préparation photo:', error);
+        Alert.alert('Photo', "Impossible de préparer l'image sélectionnée.");
+      }
     }
   };
 
@@ -127,8 +175,6 @@ export default function MechanicProfileScreen() {
 
       // Mise à jour de la photo de profil si elle a changé
       if (avatar && avatar !== profile?.photo_url) {
-        // Ici, vous devrez implémenter la logique pour uploader l'image
-        // et ajouter l'URL de l'image aux mises à jour
         updates.photo_url = avatar;
       }
 

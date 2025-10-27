@@ -430,7 +430,7 @@ export default function MechanicHomeScreen() {
  
   const [pendingServices, setPendingServices] = useState<Service[]>([]);
   const [activeService, setActiveService] = useState<Service | null>(null);
-  const [completedServicesCount, setCompletedServicesCount] = useState<number>(0);
+  const [completedServicesCount, setCompletedServicesCount] = useState<number>(profile?.missions_completed ?? 0);
   const [navigatingToActiveService, setNavigatingToActiveService] = useState(false);
   type NearbyBreakdown = {
     id: string;
@@ -490,77 +490,12 @@ export default function MechanicHomeScreen() {
 
   useEffect(() => {
     (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          setLocationText('Localisation désactivée');
-          setLocationGranted(false);
-          return;
-        }
-        setLocationGranted(true);
-        const servicesEnabled = await Location.hasServicesEnabledAsync();
-        if (!servicesEnabled) {
-          setLocationText('Services de localisation inactifs. Vérifiez que le GPS est allumé.');
-          return;
-        }
-        let pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        if (!pos || !pos.coords) {
-          const last = await Location.getLastKnownPositionAsync();
-          if (last) pos = last as any;
-        }
-        if (pos && pos.coords) {
-          setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-          // Afficher d'abord les coordonnées pour éviter le vide
-          const baseLabel = `${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`;
-          setLocationText(baseLabel);
-          // Reverse geocode non bloquant
-          try {
-            const places = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-            if (places && places.length > 0) {
-              const p = places[0];
-              const city = p.city || p.subregion || p.region || '';
-              const country = p.country || '';
-              const name = p.name || p.street || '';
-              const composed = [name, city, country].filter(Boolean).join(', ');
-              if (composed) setLocationText(composed);
-            }
-          } catch {}
-          await saveMechanicLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, address: undefined });
-          await loadNearbyBreakdowns(pos.coords.latitude, pos.coords.longitude);
-        } else {
-          setLocationText('Localisation indisponible');
-        }
-      } catch {
-        setLocationText('Localisation indisponible');
-      }
-    })();
-  }, []);
-
-  const refreshLocation = async (): Promise<{ lat: number; lng: number } | null> => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setLocationText('Localisation désactivée');
-        setLocationGranted(false);
-        return null;
-      }
-      setLocationGranted(true);
-      const servicesEnabled = await Location.hasServicesEnabledAsync();
-      if (!servicesEnabled) {
-        setLocationText('Services de localisation inactifs. Activez le GPS.');
-        return null;
-      }
-      let pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      if (!pos || !pos.coords) {
-        const last = await Location.getLastKnownPositionAsync();
-        if (last) pos = last as any;
-      }
-      if (pos && pos.coords) {
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        const baseLabel = `${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`;
+      const applyPosition = async (latitude: number, longitude: number) => {
+        setCoords({ lat: latitude, lng: longitude });
+        const baseLabel = `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`;
         setLocationText(baseLabel);
         try {
-          const places = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+          const places = await Location.reverseGeocodeAsync({ latitude, longitude });
           if (places && places.length > 0) {
             const p = places[0];
             const city = p.city || p.subregion || p.region || '';
@@ -569,17 +504,133 @@ export default function MechanicHomeScreen() {
             const composed = [name, city, country].filter(Boolean).join(', ');
             if (composed) setLocationText(composed);
           }
-        } catch {}
-        await saveMechanicLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, address: undefined });
-        await loadNearbyBreakdowns(pos.coords.latitude, pos.coords.longitude);
-        return { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      } else {
+        } catch {
+          // Ignorer les erreurs de géocodage inversé
+        }
+        await saveMechanicLocation({ latitude, longitude, address: undefined });
+        await loadNearbyBreakdowns(latitude, longitude);
+      };
+
+      const fallbackToLastKnown = async () => {
+        try {
+          const last = await Location.getLastKnownPositionAsync();
+          if (last?.coords) {
+            await applyPosition(last.coords.latitude, last.coords.longitude);
+            return true;
+          }
+        } catch {
+          // Ignorer les erreurs de récupération de la dernière position connue
+        }
+        return false;
+      };
+
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          setLocationText('Localisation désactivée');
+          setLocationGranted(false);
+          return;
+        }
+        setLocationGranted(true);
+
+        const servicesEnabled = await Location.hasServicesEnabledAsync();
+        if (!servicesEnabled) {
+          const usedLast = await fallbackToLastKnown();
+          if (!usedLast) {
+            setLocationText('Services de localisation inactifs. Vérifiez que le GPS est allumé.');
+          }
+          return;
+        }
+
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (pos?.coords) {
+          await applyPosition(pos.coords.latitude, pos.coords.longitude);
+          return;
+        }
+
+        const usedLast = await fallbackToLastKnown();
+        if (!usedLast) {
+          setLocationText('Localisation indisponible');
+        }
+      } catch {
+        const usedLast = await fallbackToLastKnown();
+        if (!usedLast) {
+          setLocationText('Localisation indisponible');
+        }
+      }
+    })();
+  }, []);
+
+  const refreshLocation = async (): Promise<{ lat: number; lng: number } | null> => {
+    const applyPosition = async (latitude: number, longitude: number) => {
+      setCoords({ lat: latitude, lng: longitude });
+      const baseLabel = `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`;
+      setLocationText(baseLabel);
+      try {
+        const places = await Location.reverseGeocodeAsync({ latitude, longitude });
+        if (places && places.length > 0) {
+          const p = places[0];
+          const city = p.city || p.subregion || p.region || '';
+          const country = p.country || '';
+          const name = p.name || p.street || '';
+          const composed = [name, city, country].filter(Boolean).join(', ');
+          if (composed) setLocationText(composed);
+        }
+      } catch {
+        // Ignorer les erreurs de géocodage inversé
+      }
+      await saveMechanicLocation({ latitude, longitude, address: undefined });
+      await loadNearbyBreakdowns(latitude, longitude);
+      return { lat: latitude, lng: longitude };
+    };
+
+    const fallbackToLastKnown = async () => {
+      try {
+        const last = await Location.getLastKnownPositionAsync();
+        if (last?.coords) {
+          return await applyPosition(last.coords.latitude, last.coords.longitude);
+        }
+      } catch {
+        // Ignorer les erreurs de récupération de la dernière position connue
+      }
+      return null;
+    };
+
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationText('Localisation désactivée');
+        setLocationGranted(false);
+        return null;
+      }
+      setLocationGranted(true);
+
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        const last = await fallbackToLastKnown();
+        if (!last) {
+          setLocationText('Services de localisation inactifs. Activez le GPS.');
+        }
+        return last;
+      }
+
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      if (pos?.coords) {
+        return await applyPosition(pos.coords.latitude, pos.coords.longitude);
+      }
+
+      const last = await fallbackToLastKnown();
+      if (!last) {
         setLocationText('Localisation indisponible');
       }
+      return last;
     } catch {
-      setLocationText('Localisation indisponible');
+      const last = await fallbackToLastKnown();
+      if (!last) {
+        setLocationText('Localisation indisponible');
+      }
+      return last;
     }
-    return null;
   };
 
   const ensureLocationEnabled = async () => {
@@ -847,6 +898,23 @@ export default function MechanicHomeScreen() {
 
       const serviceId = activeService.id || (activeService as any)._id || '';
 
+      const destination = `${targetLat},${targetLng}`;
+      const origin = mechanicPosition ? `${mechanicPosition.lat},${mechanicPosition.lng}` : '';
+      const navUrl = Platform.select({
+        ios: `http://maps.apple.com/?daddr=${destination}${origin ? `&saddr=${origin}` : ''}`,
+        android: `https://www.google.com/maps/dir/?api=1&destination=${destination}${origin ? `&origin=${origin}` : ''}`,
+        default: `https://www.google.com/maps/dir/?api=1&destination=${destination}${origin ? `&origin=${origin}` : ''}`,
+      });
+
+      if (navUrl) {
+        try {
+          await Linking.openURL(navUrl);
+          return;
+        } catch (error) {
+          console.warn('Unable to open external navigation, falling back to in-app screen.', error);
+        }
+      }
+
       router.push({
         pathname: '/(mechanic)/navigation',
         params: {
@@ -882,10 +950,27 @@ export default function MechanicHomeScreen() {
 
   const toggleAvailability = async (value: boolean) => {
     try {
-      await updateProfile({ is_available: value });
+      const docId = await fetchMechanicDocId();
+      if (!docId) {
+        Alert.alert('Disponibilité', 'Impossible de récupérer votre fiche mécanicien.');
+        return;
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_URL}/api/mechanics/${docId}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ available: value }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ message: 'Échec mise à jour disponibilité.' }));
+        throw new Error(err.message || 'Échec mise à jour disponibilité.');
+      }
+
       setIsAvailable(value);
-    } catch (error) {
-      Alert.alert('Erreur', 'Impossible de mettre à jour le statut');
+    } catch (error: any) {
+      Alert.alert('Erreur', error?.message || 'Impossible de mettre à jour le statut');
     }
   };
 

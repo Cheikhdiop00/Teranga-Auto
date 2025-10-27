@@ -115,6 +115,23 @@ router.post(
     const roleRaw = (req.body.role || '').toString();
     const role = roleRaw.toUpperCase();
 
+    const normalizeSpecialties = (value: unknown): string[] => {
+      if (Array.isArray(value)) {
+        return value
+          .map((item) => (typeof item === 'string' ? item.trim() : ''))
+          .filter((item) => item.length > 0);
+      }
+      if (typeof value === 'string' && value.trim()) {
+        return value
+          .split(/[,;]+/)
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0);
+      }
+      return [];
+    };
+
+    const specialties = normalizeSpecialties(req.body.specialties || req.body.specialty);
+
     console.log('Register payload:', { email, firstName, lastName, phoneNumber, role, address, hasPassword: !!password });
 
     // Vérifier que le rôle est valide (CLIENT ou MECANICIEN)
@@ -152,7 +169,13 @@ router.post(
       await Client.create({ user: user._id, nationalId, address });
     } else if (role === 'MECANICIEN') {
       const Mechanic = (await import('../models/Mechanic.js')).default;
-      await Mechanic.create({ user: user._id, nationalId, address });
+      await Mechanic.create({
+        user: user._id,
+        nationalId,
+        address,
+        specialty: specialties[0],
+        specialties,
+      });
     }
 
     // Envoi d'email d'activation (non-bloquant)

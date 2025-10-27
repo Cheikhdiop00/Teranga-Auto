@@ -1,105 +1,145 @@
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, TextInput } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, SafeAreaView, TextInput, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { API_URL } from '@/config/api';
+import { useAuth } from '@/contexts/AuthContext';
 
-// Données factices pour l'historique des missions
-const missionHistory = [
-  {
-    id: '1',
-    clientName: 'Jean Dupont',
-    service: 'Vidange et filtre à huile',
-    date: '15/10/2023',
-    amount: '120 €',
-    status: 'Terminé',
-    rating: 4.5,
-    carModel: 'Renault Clio 2019',
-    clientAvatar: 'https://randomuser.me/api/portraits/men/1.jpg'
-  },
-  {
-    id: '2',
-    clientName: 'Marie Martin',
-    service: 'Changement des plaquettes de frein',
-    date: '10/10/2023',
-    amount: '85 €',
-    status: 'Terminé',
-    rating: 5,
-    carModel: 'Peugeot 208 2020',
-    clientAvatar: 'https://randomuser.me/api/portraits/women/1.jpg'
-  },
-  {
-    id: '3',
-    clientName: 'Thomas Bernard',
-    service: 'Révision complète',
-    date: '05/10/2023',
-    amount: '250 €',
-    status: 'Terminé',
-    rating: 4,
-    carModel: 'Volkswagen Golf 2021',
-    clientAvatar: 'https://randomuser.me/api/portraits/men/2.jpg'
-  },
-];
-
-// Composant d'une carte de mission
-interface Mission {
-  id: string;
-  clientName: string;
-  service: string;
-  date: string;
-  amount: string;
+type HistoryRecord = {
+  _id: string;
+  clientName?: string;
+  mechanicName?: string;
+  serviceType?: string;
+  description?: string;
+  locationAddress?: string;
+  requestDate?: string;
+  interventionDate?: string;
+  closedAt?: string;
   status: string;
-  rating: number;
-  carModel: string;
-  clientAvatar: string;
-}
+  estimatedCost?: number;
+  distanceKm?: number;
+  durationMinutes?: number;
+};
 
-const MissionCard = ({ mission }: { mission: Mission }) => (
-  <View style={styles.missionCard}>
-    <View style={styles.missionHeader}>
-      <Image source={{ uri: mission.clientAvatar }} style={styles.avatar} />
-      <View style={styles.missionInfo}>
-        <Text style={styles.clientName}>{mission.clientName}</Text>
-        <View style={styles.ratingContainer}>
-          <Ionicons name="star" size={16} color="#FFD700" />
-          <Text style={styles.ratingText}>{mission.rating}</Text>
+const MissionCard = ({ mission }: { mission: HistoryRecord }) => {
+  const serviceTitle = mission.serviceType || 'Mission client';
+  const description = mission.description || 'Aucune description disponible.';
+  const closedDate = mission.closedAt || mission.interventionDate || mission.requestDate;
+  const formattedDate = closedDate ? new Date(closedDate).toLocaleDateString() : 'Date inconnue';
+  return (
+    <View style={styles.missionCard}>
+      <View style={styles.missionHeader}>
+        <View style={styles.avatarFallback}>
+          <Ionicons name="person" size={20} color="#FFFFFF" />
+        </View>
+        <View style={styles.missionInfo}>
+          <Text style={styles.clientName}>{mission.clientName || 'Client Teranga Auto'}</Text>
+          <Text style={styles.missionMeta}>{mission.locationAddress || 'Adresse non renseignée'}</Text>
+        </View>
+        <Text style={[styles.status, styles.statusCompleted]}>Terminé</Text>
+      </View>
+
+      <View style={styles.serviceInfo}>
+        <Text style={styles.serviceTitle}>{serviceTitle}</Text>
+        <Text style={styles.serviceName}>{description}</Text>
+        <View style={styles.tagsRow}>
+          {typeof mission.distanceKm === 'number' && (
+            <View style={styles.tag}>
+              <Ionicons name="navigate" size={14} color="#2563EB" />
+              <Text style={styles.tagText}>{mission.distanceKm.toFixed(1)} km</Text>
+            </View>
+          )}
+          {typeof mission.durationMinutes === 'number' && (
+            <View style={styles.tag}>
+              <Ionicons name="time" size={14} color="#2563EB" />
+              <Text style={styles.tagText}>{mission.durationMinutes} min</Text>
+            </View>
+          )}
+          {typeof mission.estimatedCost === 'number' && (
+            <View style={styles.tag}>
+              <Ionicons name="cash" size={14} color="#2563EB" />
+              <Text style={styles.tagText}>{mission.estimatedCost.toFixed(0)} CFA</Text>
+            </View>
+          )}
         </View>
       </View>
-      <Text style={[styles.status, styles.statusCompleted]}>{mission.status}</Text>
+
+      <View style={styles.missionFooter}>
+        <Text style={styles.date}>{formattedDate}</Text>
+        <Text style={styles.amount}>{mission.mechanicName || ''}</Text>
+      </View>
     </View>
-    
-    <View style={styles.serviceInfo}>
-      <Text style={styles.serviceTitle}>Service effectué</Text>
-      <Text style={styles.serviceName}>{mission.service}</Text>
-      <Text style={styles.carModel}>{mission.carModel}</Text>
-    </View>
-    
-    <View style={styles.missionFooter}>
-      <Text style={styles.date}>{mission.date}</Text>
-      <Text style={styles.amount}>{mission.amount}</Text>
-    </View>
-  </View>
-);
+  );
+};
 
 export default function MechanicHistoryScreen() {
+  const { profile } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
-  const [missions, setMissions] = useState(missionHistory);
+  const [missions, setMissions] = useState<HistoryRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSearch = (text: string) => {
-    setSearchQuery(text);
-    if (text === '') {
-      setMissions(missionHistory);
-    } else {
-      const filtered = missionHistory.filter(mission => 
-        mission.clientName.toLowerCase().includes(text.toLowerCase()) ||
-        mission.service.toLowerCase().includes(text.toLowerCase()) ||
-        mission.carModel.toLowerCase().includes(text.toLowerCase())
-      );
-      setMissions(filtered);
+  const mechanicId = useMemo(() => profile?.id || (profile as any)?._id, [profile]);
+
+  const fetchHistory = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!mechanicId) return;
+      if (!opts?.silent) {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        const res = await fetch(`${API_URL}/api/histories/byMechanic/${mechanicId}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ message: "Impossible de charger l'historique." }));
+          throw new Error(err.message || "Impossible de charger l'historique.");
+        }
+        const data: HistoryRecord[] = await res.json();
+        setMissions(data);
+      } catch (err: any) {
+        setError(err?.message || 'Erreur inattendue.');
+      } finally {
+        if (!opts?.silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [API_URL, mechanicId]
+  );
+
+  useEffect(() => {
+    if (mechanicId) {
+      fetchHistory();
     }
-  };
+  }, [fetchHistory, mechanicId]);
 
-  const handleDeleteMission = (id: string) => {
-    setMissions(prevMissions => prevMissions.filter(mission => mission.id !== id));
-  };
+  const onRefresh = useCallback(async () => {
+    if (!mechanicId) return;
+    setRefreshing(true);
+    await fetchHistory({ silent: true });
+    setRefreshing(false);
+  }, [fetchHistory, mechanicId]);
+
+  const filteredMissions = useMemo(() => {
+    if (!searchQuery.trim()) return missions;
+    const query = searchQuery.toLowerCase();
+    return missions.filter((mission) =>
+      (mission.clientName && mission.clientName.toLowerCase().includes(query)) ||
+      (mission.serviceType && mission.serviceType.toLowerCase().includes(query)) ||
+      (mission.description && mission.description.toLowerCase().includes(query))
+    );
+  }, [missions, searchQuery]);
+
+  if (!mechanicId) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.emptyState}>
+          <Ionicons name="warning" size={40} color="#999" />
+          <Text style={styles.emptyStateText}>Profil mécanicien introuvable.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -111,13 +151,13 @@ export default function MechanicHistoryScreen() {
               style={styles.searchInput}
               placeholder="Rechercher..."
               value={searchQuery}
-              onChangeText={handleSearch}
+              onChangeText={setSearchQuery}
               placeholderTextColor="#999"
             />
             {searchQuery === '' ? (
               <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
             ) : (
-              <TouchableOpacity onPress={() => handleSearch('')} style={styles.clearButton}>
+              <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
                 <Ionicons name="close-circle" size={20} color="#999" />
               </TouchableOpacity>
             )}
@@ -125,29 +165,39 @@ export default function MechanicHistoryScreen() {
         </View>
       </View>
 
-      <FlatList
-        data={missions}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View style={styles.missionCardContainer}>
-            <MissionCard mission={item} />
-            <TouchableOpacity 
-              style={styles.deleteButton}
-              onPress={() => handleDeleteMission(item.id)}
-            >
-              <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-            </TouchableOpacity>
-          </View>
-        )}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={48} color="#DDD" />
-            <Text style={styles.emptyStateText}>Aucune mission trouvée</Text>
-          </View>
-        }
-      />
+      {loading ? (
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color="#0A1F44" />
+          <Text style={styles.loadingText}>Chargement de votre historique...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.emptyState}>
+          <Ionicons name="alert-circle" size={48} color="#FF3B30" />
+          <Text style={styles.emptyStateText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => fetchHistory()}>
+            <Text style={styles.retryText}>Réessayer</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredMissions}
+          keyExtractor={(item) => item._id}
+          renderItem={({ item }) => (
+            <View style={styles.missionCardContainer}>
+              <MissionCard mission={item} />
+            </View>
+          )}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Ionicons name="document-text-outline" size={48} color="#DDD" />
+              <Text style={styles.emptyStateText}>Aucune mission terminée pour le moment.</Text>
+            </View>
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
