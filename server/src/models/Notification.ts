@@ -7,6 +7,7 @@ export interface INotification extends Document {
   type?: string; // e.g., system, chat, status
   read: boolean;
   sentAt: Date;
+  metadata?: Record<string, any>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -18,7 +19,8 @@ const notificationSchema = new Schema<INotification>(
     content: { type: String, required: true },
     type: { type: String },
     read: { type: Boolean, default: false },
-    sentAt: { type: Date, default: () => new Date() }
+    sentAt: { type: Date, default: () => new Date() },
+    metadata: { type: Schema.Types.Mixed },
   },
   { timestamps: true }
 );

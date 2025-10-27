@@ -1,11 +1,51 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Image } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'expo-router';
-import { LogOut, User, Phone, MapPin, Mail } from 'lucide-react-native';
+import { LogOut, User, Phone, MapPin, Mail, Edit3 } from 'lucide-react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/config/api';
 
 export default function ClientProfileScreen() {
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, updateProfile } = useAuth() as any;
   const router = useRouter();
+  const initialPhoto = (profile as any)?.profilePhoto || (profile as any)?.profile_photo;
+  const [photoUri, setPhotoUri] = useState<string | undefined>(initialPhoto);
+
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      (async () => {
+        try {
+          const token = await AsyncStorage.getItem('authToken');
+          const res = await fetch(`${API_URL}/api/auth/me`, {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          });
+          if (!res.ok) return;
+          const user = await res.json();
+          if (!mounted) return;
+          const p = user?.profilePhoto || user?.profile_photo;
+          if (p) setPhotoUri(p);
+          if (typeof updateProfile === 'function') {
+            updateProfile({
+              first_name: user?.firstName ?? profile?.first_name,
+              last_name: user?.lastName ?? profile?.last_name,
+              phone: user?.phoneNumber ?? profile?.phone,
+              address: user?.address ?? profile?.address,
+              profile_photo: p ?? initialPhoto,
+            });
+          }
+        } catch {}
+      })();
+      return () => {
+        mounted = false;
+      };
+    }, [])
+  );
 
   const handleSignOut = () => {
     Alert.alert('Déconnexion', 'Voulez-vous vraiment vous déconnecter ?', [
@@ -25,15 +65,22 @@ export default function ClientProfileScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Profil</Text>
+        <TouchableOpacity style={styles.editBtn} onPress={() => router.push('/edit-profile')}>
+          <Edit3 color="#007AFF" size={20} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.content}>
         <View style={styles.avatarContainer}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {profile?.first_name[0]}
-              {profile?.last_name[0]}
-            </Text>
+            {photoUri ? (
+              <Image source={{ uri: photoUri }} style={{ width: 100, height: 100, borderRadius: 50 }} />
+            ) : (
+              <Text style={styles.avatarText}>
+                {profile?.first_name?.[0]}
+                {profile?.last_name?.[0]}
+              </Text>
+            )}
           </View>
           <Text style={styles.name}>
             {profile?.first_name} {profile?.last_name}
@@ -86,10 +133,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
+  },
+  editBtn: {
+    padding: 8,
   },
   content: {
     padding: 16,

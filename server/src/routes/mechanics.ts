@@ -14,6 +14,20 @@ const router = Router();
  */
 
 // CRUD
+router.get(
+  '/',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const mechanics = await Mechanic.find()
+      .populate({
+        path: 'user',
+        select: 'firstName lastName phoneNumber profilePhoto address',
+      })
+      .lean();
+
+    res.json(mechanics);
+  }),
+);
+
 router.use('/', buildCrudRouter(Mechanic, 'Mechanic'));
 
 /**
@@ -49,7 +63,12 @@ router.get(
       return res.status(400).json({ message: 'lat & lng are required numeric query params' });
     }
 
-    const mechanics = await Mechanic.find({ latitude: { $ne: null }, longitude: { $ne: null } }).lean();
+    const mechanics = await Mechanic.find({ latitude: { $ne: null }, longitude: { $ne: null } })
+      .populate({
+        path: 'user',
+        select: 'firstName lastName phoneNumber profilePhoto address',
+      })
+      .lean();
     const enriched = mechanics
       .map((m: any) => {
         const d = distanceKm({ lat, lng }, { lat: m.latitude, lng: m.longitude });
