@@ -38,6 +38,13 @@ export default function AdminTabsLayout() {
           ),
         }}
       />
+      {/* Masquer l'onglet Notifications de la barre */}
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          href: null,
+        }}
+      />
       <Tabs.Screen
         name="profile"
         options={{

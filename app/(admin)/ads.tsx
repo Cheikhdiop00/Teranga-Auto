@@ -67,7 +67,7 @@ export default function AdsManagementScreen() {
       }
     : {
         background: '#F5F5F5',
-        headerBackground: '#0A1F44',
+        headerBackground: '#007AFF',
         borderColor: '#E0E0E0',
         textPrimary: '#000000',
         textSecondary: '#666666',

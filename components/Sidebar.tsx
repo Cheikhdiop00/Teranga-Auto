@@ -53,7 +53,7 @@ export default function Sidebar({ isVisible, onClose, isDarkMode, toggleTheme }:
           value={isDarkMode}
           onValueChange={toggleTheme}
           trackColor={{ false: '#767577', true: '#81b0ff' }}
-          thumbColor={isDarkMode ? '#f5dd4b' : '#f4f3f4'}
+          thumbColor={isDarkMode ? '#007AFF' : '#f4f3f4'}
         />
       ),
     },

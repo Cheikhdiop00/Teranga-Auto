@@ -22,9 +22,9 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 16,
     paddingHorizontal: 16,
-    backgroundColor: '#0A1F44',
+    backgroundColor: '#007AFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#0A1F44',
+    borderBottomColor: '#007AFF',
   },
   title: {
     fontSize: 28,
@@ -38,6 +38,6 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 14,
-    color: '#0A1F44',
+    color: '#007AFF',
   },
 });

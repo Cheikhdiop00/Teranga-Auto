@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/config/api';
-import { SwipeableRow } from '../../../components/SwipeableRow';
+import { SwipeableRow } from '@/components/SwipeableRow';
 import { useAuth } from '@/contexts/AuthContext';
 
 // Types

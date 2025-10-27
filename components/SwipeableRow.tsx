@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 import { ReactNode, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -66,3 +67,52 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+=======
+import React from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
+import { Ionicons } from '@expo/vector-icons';
+
+export type SwipeableRowProps = {
+  children: React.ReactNode;
+  onDelete?: () => void;
+  enabled?: boolean;
+};
+
+export const SwipeableRow: React.FC<SwipeableRowProps> = ({ children, onDelete, enabled = true }) => {
+  const renderRightActions = () => (
+    <TouchableOpacity style={styles.deleteAction} onPress={onDelete} disabled={!onDelete}>
+      <Ionicons name="trash" size={20} color="#fff" />
+      <Text style={styles.deleteText}>Supprimer</Text>
+    </TouchableOpacity>
+  );
+
+  if (!enabled) {
+    return <View>{children}</View>;
+  }
+
+  return (
+    <Swipeable renderRightActions={renderRightActions} enabled={enabled}>
+      <View>{children}</View>
+    </Swipeable>
+  );
+};
+
+const styles = StyleSheet.create({
+  deleteAction: {
+    width: 90,
+    backgroundColor: '#FF3B30',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  deleteText: {
+    color: '#fff',
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+});
+
+export default SwipeableRow;
+>>>>>>> Stashed changes

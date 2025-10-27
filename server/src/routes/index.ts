@@ -13,6 +13,7 @@ import advicesRouter from './advices.js';
 import adsRouter from './ads.js';
 import historiesRouter from './histories.js';
 import adminRouter from './admin.js';
+import mailRouter from './mail.js';
 
 const router = Router();
 
@@ -34,5 +35,6 @@ router.use('/advices', advicesRouter);
 router.use('/ads', adsRouter);
 router.use('/histories', historiesRouter);
 router.use('/admin', adminRouter);
+router.use('/mail', mailRouter);
 
 export default router;
