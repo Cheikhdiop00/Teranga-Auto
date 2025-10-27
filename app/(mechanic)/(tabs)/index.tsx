@@ -1040,7 +1040,7 @@ export default function MechanicHomeScreen() {
       {/* Bannière publicitaire */}
       <View style={styles.adBanner}>
         <Image 
-          source={require('@/assets/images/Futuristic Teranga Auto Logo.png')} 
+          source={require('../../../assets/images/Futuristic Teranga Auto Logo.png')} 
           style={styles.adImage}
           resizeMode="contain"
         />

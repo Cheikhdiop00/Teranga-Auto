@@ -159,8 +159,9 @@ router.post(
       password,
       phoneNumber,
       role,
-      status: 'active', // Changé de 'pending' à 'active'
-      profilePhoto
+      status: 'active',
+      emailVerified: true,
+      profilePhoto,
     });
 
     // Créer le document Client ou Mechanic selon le rôle
@@ -176,27 +177,6 @@ router.post(
         specialty: specialties[0],
         specialties,
       });
-    }
-
-    // Envoi d'email d'activation (non-bloquant)
-    try {
-      const activationToken = signToken({ id: user._id.toString(), role: user.role }, '24h');
-      console.log('📧 Génération token activation pour:', user.email);
-
-      // Ne pas attendre l'envoi d'email pour éviter les timeouts
-      sendActivationEmail(user.email, activationToken)
-        .then((result: any) => {
-          console.log('✅ Email d\'activation envoyé avec succès à:', user.email);
-          console.log('   Message ID:', result.messageId);
-        })
-        .catch((err: any) => {
-          console.error('❌ Erreur envoi email activation:', err.message);
-          console.error('   Destinataire:', user.email);
-          console.error('   Token généré:', !!activationToken);
-        });
-    } catch (error) {
-      console.error('❌ Erreur génération token activation:', (error as Error).message);
-      console.error('   Pour utilisateur:', user.email);
     }
 
     const token = signToken({ id: user._id.toString(), role: user.role });
@@ -219,7 +199,7 @@ router.post(
     
     res.status(201).json({ 
       success: true,
-      message: `Inscription réussie. Vérifiez votre email pour activer votre compte.`,
+      message: `Inscription réussie.`,
       token,
       user: {
         ...userResponse,
@@ -273,14 +253,6 @@ router.post(
       return res.status(401).json({ 
         success: false,
         message: 'Identifiants invalides' 
-      });
-    }
-
-    if (user.status !== 'active') {
-      console.log('User status not active:', user.status);
-      return res.status(403).json({ 
-        success: false,
-        message: 'Compte non activé. Veuillez vérifier votre email pour l\'activer.' 
       });
     }
 
@@ -577,6 +549,7 @@ router.get(
         return res.status(400).json({ message: 'Token invalide ou expiré' });
       }
       user.status = 'active';
+      user.emailVerified = true;
       await user.save();
       res.json({ message: 'Compte activé avec succès. Vous pouvez maintenant vous connecter.' });
     } catch (err) {

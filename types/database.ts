@@ -8,6 +8,7 @@ export interface Profile {
   first_name: string;
   last_name: string;
   phone: string;
+  email?: string;
   address: string;
   photo_url?: string;
   id_card_number?: string;

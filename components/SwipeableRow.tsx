@@ -1,71 +1,68 @@
-import React, { useRef } from 'react';
-import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { RectButton, Swipeable } from 'react-native-gesture-handler';
-import { Ionicons } from '@expo/vector-icons';
+import { ReactNode, useRef } from 'react';
+import { View, Text, StyleSheet, Animated } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 
 interface SwipeableRowProps {
-  children: React.ReactNode;
-  onDelete: () => void;
+  children: ReactNode;
+  onDelete?: () => void;
   enabled?: boolean;
+  deleteLabel?: string;
 }
 
-export const SwipeableRow: React.FC<SwipeableRowProps> = ({ 
-  children, 
+export function SwipeableRow({
+  children,
   onDelete,
-  enabled = true 
-}) => {
-  const swipeableRow = useRef<Swipeable>(null);
+  enabled = true,
+  deleteLabel = 'Supprimer',
+}: SwipeableRowProps) {
+  const swipeableRef = useRef<Swipeable | null>(null);
+
+  if (!enabled || !onDelete) {
+    return <>{children}</>;
+  }
 
   const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
-    const trans = progress.interpolate({
+    const scale = progress.interpolate({
       inputRange: [0, 1],
-      outputRange: [100, 0],
+      outputRange: [0.8, 1],
+      extrapolate: 'clamp',
     });
 
     return (
-      <Animated.View 
-        style={[
-          styles.rightAction, 
-          { transform: [{ translateX: trans }] }
-        ]}
-      >
-        <RectButton
-          style={[styles.rightAction, styles.deleteAction]}
-          onPress={() => {
-            swipeableRow.current?.close();
-            onDelete();
-          }}
-        >
-          <Ionicons name="trash-outline" size={24} color="white" />
-        </RectButton>
+      <Animated.View style={[styles.actionContainer, { transform: [{ scale }] }]}>
+        <Text style={styles.actionText}>{deleteLabel}</Text>
       </Animated.View>
     );
   };
 
-  if (!enabled) {
-    return <>{children}</>;
-  }
+  const handleOpen = () => {
+    swipeableRef.current?.close();
+    onDelete?.();
+  };
 
   return (
     <Swipeable
-      ref={swipeableRow}
-      friction={2}
-      rightThreshold={40}
+      ref={swipeableRef}
       renderRightActions={renderRightActions}
+      onSwipeableOpen={handleOpen}
+      overshootRight={false}
     >
-      {children}
+      <View>{children}</View>
     </Swipeable>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  rightAction: {
-    width: 80,
-    flexDirection: 'row',
+  actionContainer: {
+    width: 96,
+    backgroundColor: '#DC2626',
     justifyContent: 'center',
     alignItems: 'center',
+    marginVertical: 4,
+    borderRadius: 12,
   },
-  deleteAction: {
-    backgroundColor: '#FF3B30',
+  actionText: {
+    color: '#fff',
+    fontWeight: '600',
   },
 });

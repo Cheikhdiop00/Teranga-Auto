@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import LogoIcon from '@/assets/images/icon.png';
+import LogoIcon from '../../assets/images/Icon.jpg';
 import { Eye, EyeOff } from 'lucide-react-native';
 
 export default function LoginScreen() {
@@ -219,7 +219,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
   },
   scrollContent: {
     flexGrow: 1,

@@ -109,10 +109,21 @@ export const startConversation = asyncHandler(async (req: Request & { user: any 
   });
 
   if (!conversation) {
-    conversation = await Conversation.create({
-      participants: [userId, participantId],
-      isActive: true
-    });
+    try {
+      conversation = await Conversation.create({
+        participants: [userId, participantId],
+        isActive: true,
+      });
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        conversation = await Conversation.findOne({
+          participants: { $all: [userId, participantId], $size: 2 },
+          isActive: true,
+        });
+      } else {
+        throw error;
+      }
+    }
   }
 
   // Si un message initial est fourni, le créer

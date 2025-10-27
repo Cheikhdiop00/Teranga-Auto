@@ -7,15 +7,29 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { api } from '@/lib/supabase';
+import { API_BASE_URL } from '@/config/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Profile } from '@/types/database';
 import { Search, Ban, CheckCircle } from 'lucide-react-native';
 
 export default function UsersScreen() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'client' | 'mechanic'>('all');
+  const [filter, setFilter] = useState<'all' | 'client' | 'mechanic' | 'admin'>('all');
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
+  const [editForm, setEditForm] = useState({
+    firstName: '',
+    lastName: '',
+    phoneNumber: '',
+    email: '',
+    role: '',
+  });
+  const isEditing = !!selectedUser;
 
   useEffect(() => {
     loadUsers();
@@ -26,15 +40,17 @@ export default function UsersScreen() {
       const res = await api.admin.users();
       const all = (res.users || []) as any[];
       const filtered = all.filter((u) => {
-        if (filter === 'all') return u.role !== 'ADMIN';
+        if (filter === 'all') return true;
+        if (filter === 'admin') return u.role === 'ADMIN';
         return filter === 'client' ? u.role === 'CLIENT' : u.role === 'MECANICIEN';
       });
       const mapped: Profile[] = filtered.map((u: any) => ({
         id: u._id || u.id,
-        user_type: u.role === 'CLIENT' ? 'client' : 'mechanic',
+        user_type: u.role === 'CLIENT' ? 'client' : u.role === 'ADMIN' ? 'admin' : 'mechanic',
         first_name: u.firstName || '',
         last_name: u.lastName || '',
         phone: u.phoneNumber || '',
+        email: u.email || '',
         address: '',
         photo_url: u.profilePhoto,
         id_card_number: undefined,
@@ -56,15 +72,75 @@ export default function UsersScreen() {
     }
   };
 
+  const openEditModal = (user: Profile) => {
+    setSelectedUser(user);
+    setEditForm({
+      firstName: user.first_name,
+      lastName: user.last_name,
+      phoneNumber: user.phone,
+      email: user.email || '',
+      role: user.user_type === 'client' ? 'CLIENT' : user.user_type === 'admin' ? 'ADMIN' : 'MECANICIEN',
+    });
+    setModalVisible(true);
+  };
+
+  const openCreateModal = () => {
+    setSelectedUser(null);
+    setEditForm({ firstName: '', lastName: '', phoneNumber: '', email: '', role: 'CLIENT' });
+    setModalVisible(true);
+  };
+
+  const saveUser = async () => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      if (isEditing && selectedUser) {
+        await fetch(`${API_BASE_URL}/admin/users/${selectedUser.id}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({
+            firstName: editForm.firstName,
+            lastName: editForm.lastName,
+            phoneNumber: editForm.phoneNumber,
+            email: editForm.email,
+            role: editForm.role,
+          }),
+        });
+        Alert.alert('Succès', 'Utilisateur modifié avec succès');
+      } else {
+        await fetch(`${API_BASE_URL}/admin/users`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            firstName: editForm.firstName,
+            lastName: editForm.lastName,
+            phoneNumber: editForm.phoneNumber,
+            email: editForm.email,
+            role: editForm.role || 'CLIENT',
+            status: 'active',
+          }),
+        });
+        Alert.alert('Succès', 'Utilisateur créé avec succès');
+      }
+
+      setModalVisible(false);
+      loadUsers();
+    } catch (error) {
+      Alert.alert('Erreur', `Impossible de ${isEditing ? 'modifier' : 'créer'} l'utilisateur`);
+    }
+  };
+
   const toggleBlockUser = async (userId: string, isBlocked: boolean) => {
     try {
       const newStatus = isBlocked ? 'active' : 'inactive';
-      await fetch(`${process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.49:3000'}/api/admin/users/${userId}`, {
+      const token = await AsyncStorage.getItem('authToken');
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${await (await import('@react-native-async-storage/async-storage')).default.getItem('authToken')}`
-        },
+        headers,
         body: JSON.stringify({ status: newStatus }),
       });
 
@@ -78,10 +154,46 @@ export default function UsersScreen() {
     }
   };
 
+  const deleteUser = async (user: Profile) => {
+    if (user.user_type === 'admin') {
+      Alert.alert('Action interdite', "Vous ne pouvez pas supprimer un administrateur.");
+      return;
+    }
+    Alert.alert(
+      'Supprimer',
+      `Supprimer ${user.first_name} ${user.last_name} ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const token = await AsyncStorage.getItem('authToken');
+              const headers: any = {};
+              if (token) headers.Authorization = `Bearer ${token}`;
+              await fetch(`${API_BASE_URL}/admin/users/${user.id}`, {
+                method: 'DELETE',
+                headers,
+              });
+              Alert.alert('Succès', 'Utilisateur supprimé');
+              loadUsers();
+            } catch (e) {
+              Alert.alert('Erreur', "Impossible de supprimer l'utilisateur");
+            }
+          }
+        }
+      ]
+    );
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Utilisateurs</Text>
+        <TouchableOpacity style={styles.addButton} onPress={openCreateModal}>
+          <Text style={styles.addButtonText}>Ajouter</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.filterContainer}>
@@ -130,6 +242,22 @@ export default function UsersScreen() {
             Mécaniciens
           </Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            filter === 'admin' && styles.filterButtonActive,
+          ]}
+          onPress={() => setFilter('admin')}
+        >
+          <Text
+            style={[
+              styles.filterButtonText,
+              filter === 'admin' && styles.filterButtonTextActive,
+            ]}
+          >
+            Admins
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -144,7 +272,7 @@ export default function UsersScreen() {
           </View>
         ) : (
           users.map((user) => (
-            <View key={user.id} style={styles.userCard}>
+            <TouchableOpacity key={user.id} style={styles.userCard} onPress={() => openEditModal(user)}>
               <View style={styles.userHeader}>
                 <View style={styles.userAvatar}>
                   <Text style={styles.userAvatarText}>
@@ -157,7 +285,7 @@ export default function UsersScreen() {
                     {user.first_name} {user.last_name}
                   </Text>
                   <Text style={styles.userType}>
-                    {user.user_type === 'client' ? 'Client' : 'Mécanicien'}
+                    {user.user_type === 'client' ? 'Client' : user.user_type === 'admin' ? 'Administrateur' : 'Mécanicien'}
                   </Text>
                   <Text style={styles.userPhone}>{user.phone}</Text>
                   {user.user_type === 'mechanic' && (
@@ -213,10 +341,71 @@ export default function UsersScreen() {
                   {user.is_blocked ? 'Débloquer' : 'Bloquer'}
                 </Text>
               </TouchableOpacity>
-            </View>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#FFECEC', marginTop: 8 }]}
+                onPress={() => deleteUser(user)}
+              >
+                <Text style={[styles.actionButtonText, { color: '#FF3B30' }]}>Supprimer</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
           ))
         )}
       </ScrollView>
+
+      <Modal visible={modalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{isEditing ? "Modifier l'utilisateur" : 'Ajouter un utilisateur'}</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="Prénom"
+              value={editForm.firstName}
+              onChangeText={(text) => setEditForm({ ...editForm, firstName: text })}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Nom"
+              value={editForm.lastName}
+              onChangeText={(text) => setEditForm({ ...editForm, lastName: text })}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Téléphone"
+              value={editForm.phoneNumber}
+              onChangeText={(text) => setEditForm({ ...editForm, phoneNumber: text })}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              value={editForm.email}
+              onChangeText={(text) => setEditForm({ ...editForm, email: text })}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Rôle (CLIENT, MECANICIEN, ADMIN)"
+              value={editForm.role}
+              onChangeText={(text) => setEditForm({ ...editForm, role: text })}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                onPress={() => setModalVisible(false)}
+                style={styles.cancelButton}
+              >
+                <Text style={styles.cancelButtonText}>Annuler</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={saveUser} style={styles.saveButton}>
+                <Text style={styles.saveButtonText}>{isEditing ? 'Sauvegarder' : 'Créer'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -233,6 +422,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#0A1F44',
     borderBottomWidth: 1,
     borderBottomColor: '#0A1F44',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   title: {
     fontSize: 28,
@@ -373,5 +565,70 @@ const styles = StyleSheet.create({
   emptyStateText: {
     fontSize: 14,
     color: '#666',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '90%',
+    maxWidth: 400,
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 12,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#000',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    fontSize: 16,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#666',
+    fontWeight: '600',
+  },
+  saveButton: {
+    flex: 1,
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  addButton: {
+    backgroundColor: '#FFD700',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  addButtonText: {
+    color: '#0A1F44',
+    fontWeight: '700',
+    fontSize: 14,
   },
 });

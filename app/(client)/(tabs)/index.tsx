@@ -46,6 +46,8 @@ import { API_URL } from '@/config/api';
 import { Profile } from '@/types/database';
 import { io, Socket } from 'socket.io-client';
 
+type MechanicListItem = Profile & { userId?: string };
+
 type MissionPayload = {
   breakdown: any;
   mechanic: any;
@@ -106,7 +108,7 @@ const normalizeMechanicSpecialties = (mechanic: any): string[] => {
 export default function ClientHomeScreen() {
   const { profile } = useAuth();
   const router = useRouter();
-  const [mechanics, setMechanics] = useState<Profile[]>([]);
+  const [mechanics, setMechanics] = useState<MechanicListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const servicesAnimation = useRef(new Animated.Value(0)).current;
@@ -114,7 +116,7 @@ export default function ClientHomeScreen() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [clientDocId, setClientDocId] = useState<string | null>(null);
   const [requestModalVisible, setRequestModalVisible] = useState(false);
-  const [selectedMechanic, setSelectedMechanic] = useState<Profile | null>(null);
+  const [selectedMechanic, setSelectedMechanic] = useState<MechanicListItem | null>(null);
   const [requestDescription, setRequestDescription] = useState('');
   const [requestSubmitting, setRequestSubmitting] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -312,7 +314,7 @@ export default function ClientHomeScreen() {
         return [];
       };
 
-      let mapped: Profile[] = (Array.isArray(list) ? list : []).map((m: any) => ({
+      let mapped: MechanicListItem[] = (Array.isArray(list) ? list : []).map((m: any) => ({
         id: m._id || m.id,
         user_type: 'mechanic',
         first_name: resolveName(m.user, ['firstName', 'first_name', 'prenom'], resolveName(m, ['firstName', 'first_name', 'prenom'], 'Mécano')),
@@ -330,6 +332,7 @@ export default function ClientHomeScreen() {
         is_blocked: false,
         created_at: m.createdAt || new Date().toISOString(),
         updated_at: m.updatedAt || new Date().toISOString(),
+        userId: m.user?._id || m.user?.id || m.userId || undefined,
       }));
 
       const normalizedSelectedType = selectedType ? normalizeSpecialty(selectedType) : null;
@@ -384,7 +387,7 @@ export default function ClientHomeScreen() {
     setRequestError(null);
   };
 
-  const handleRequestService = async (mechanic: Profile) => {
+  const handleRequestService = async (mechanic: MechanicListItem) => {
     const docId = await fetchClientDocId();
     if (!docId) {
       Alert.alert(
@@ -405,6 +408,56 @@ export default function ClientHomeScreen() {
     setRequestDescription((prev) => prev || (selectedType ? `Panne ${selectedType.toLowerCase()}` : ''));
     setRequestError(null);
     setRequestModalVisible(true);
+  };
+
+  const startConversationWithMechanic = async (mechanic: MechanicListItem) => {
+    try {
+      const participantId = mechanic.userId || mechanic.id;
+      if (!participantId) {
+        Alert.alert(
+          'Discussion impossible',
+          'Impossible de trouver le compte du mécanicien. Réessayez plus tard.',
+        );
+        return;
+      }
+
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) {
+        Alert.alert(
+          'Connexion requise',
+          'Veuillez vous reconnecter pour démarrer une discussion avec le mécanicien.',
+        );
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/api/messages/conversations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ participantId }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.message || 'Impossible de démarrer la conversation.');
+      }
+
+      const data = await res.json();
+      const conversationId = data?.data?._id || data?.data?.id;
+      if (!conversationId) {
+        Alert.alert(
+          'Discussion créée',
+          'Conversation démarrée, mais impossible de récupérer son identifiant.',
+        );
+        return;
+      }
+
+      router.push(`/(client)/chat/${conversationId}` as any);
+    } catch (error: any) {
+      Alert.alert('Discussion impossible', error.message || 'Erreur inattendue.');
+    }
   };
 
   const submitBreakdownRequest = async () => {
@@ -970,7 +1023,10 @@ export default function ClientHomeScreen() {
                   </View>
                 </View>
                 <View style={styles.mechanicActions}>
-                  <TouchableOpacity style={styles.actionButton}>
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => startConversationWithMechanic(mechanic)}
+                  >
                     <MessageCircle color="#007AFF" size={20} />
                   </TouchableOpacity>
                   <TouchableOpacity
