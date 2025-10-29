@@ -21,11 +21,24 @@ type HistoryRecord = {
   durationMinutes?: number;
 };
 
+const getStatusConfig = (status: string) => {
+  const statusMap: Record<string, { label: string; bg: string; color: string }> = {
+    pending: { label: 'En attente', bg: '#FEF3C7', color: '#92400E' },
+    accepted: { label: 'Accepté', bg: '#DBEAFE', color: '#1E40AF' },
+    in_progress: { label: 'En cours', bg: '#E0E7FF', color: '#3730A3' },
+    completed: { label: 'Terminé', bg: '#DCFCE7', color: '#15803D' },
+    cancelled: { label: 'Annulé', bg: '#FEE2E2', color: '#991B1B' },
+  };
+  return statusMap[status] || { label: status, bg: '#F3F4F6', color: '#6B7280' };
+};
+
 const MissionCard = ({ mission }: { mission: HistoryRecord }) => {
   const serviceTitle = mission.serviceType || 'Mission client';
   const description = mission.description || 'Aucune description disponible.';
   const closedDate = mission.closedAt || mission.interventionDate || mission.requestDate;
   const formattedDate = closedDate ? new Date(closedDate).toLocaleDateString() : 'Date inconnue';
+  const statusConfig = getStatusConfig(mission.status);
+  
   return (
     <View style={styles.missionCard}>
       <View style={styles.missionHeader}>
@@ -36,7 +49,9 @@ const MissionCard = ({ mission }: { mission: HistoryRecord }) => {
           <Text style={styles.clientName}>{mission.clientName || 'Client Teranga Auto'}</Text>
           <Text style={styles.missionMeta}>{mission.locationAddress || 'Adresse non renseignée'}</Text>
         </View>
-        <Text style={[styles.status, styles.statusCompleted]}>Terminé</Text>
+        <View style={[styles.statusBadge, { backgroundColor: statusConfig.bg }]}>
+          <Text style={[styles.statusText, { color: statusConfig.color }]}>{statusConfig.label}</Text>
+        </View>
       </View>
 
       <View style={styles.serviceInfo}>
@@ -90,13 +105,20 @@ export default function MechanicHistoryScreen() {
         setError(null);
       }
       try {
-        const res = await fetch(`${API_URL}/api/histories/byMechanic/${mechanicId}`);
+        // Charger tous les services du mécanicien (pas seulement l'historique)
+        const res = await fetch(`${API_URL}/api/services/mechanic/${mechanicId}`);
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ message: "Impossible de charger l'historique." }));
-          throw new Error(err.message || "Impossible de charger l'historique.");
+          const err = await res.json().catch(() => ({ message: 'Impossible de charger vos services.' }));
+          throw new Error(err.message || 'Impossible de charger vos services.');
         }
         const data: HistoryRecord[] = await res.json();
-        setMissions(data);
+        // Trier par date (plus récent en premier)
+        const sorted = data.sort((a, b) => {
+          const dateA = new Date(a.closedAt || a.interventionDate || a.requestDate || 0).getTime();
+          const dateB = new Date(b.closedAt || b.interventionDate || b.requestDate || 0).getTime();
+          return dateB - dateA;
+        });
+        setMissions(sorted);
       } catch (err: any) {
         setError(err?.message || 'Erreur inattendue.');
       } finally {
@@ -145,7 +167,7 @@ export default function MechanicHistoryScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Historique</Text>
+        <Text style={styles.title}>Mes services</Text>
         <View style={styles.headerRight}>
           <View style={styles.searchContainer}>
             <TextInput
@@ -169,7 +191,7 @@ export default function MechanicHistoryScreen() {
       {loading ? (
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color="#0A1F44" />
-          <Text style={styles.loadingText}>Chargement de votre historique...</Text>
+          <Text style={styles.loadingText}>Chargement de vos services...</Text>
         </View>
       ) : error ? (
         <View style={styles.emptyState}>
@@ -194,7 +216,7 @@ export default function MechanicHistoryScreen() {
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Ionicons name="document-text-outline" size={48} color="#DDD" />
-              <Text style={styles.emptyStateText}>Aucune mission terminée pour le moment.</Text>
+              <Text style={styles.emptyStateText}>Aucun service pour le moment.</Text>
             </View>
           }
         />
@@ -270,7 +292,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 50,
     paddingBottom: 20,
-    backgroundColor: '#0A1F44',
+    backgroundColor: '#007AFF',
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
     shadowColor: '#000',
@@ -311,10 +333,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  avatar: {
+  avatarFallback: {
     width: 40,
     height: 40,
     borderRadius: 20,
+    backgroundColor: '#2563EB',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 12,
   },
   missionInfo: {
@@ -331,20 +356,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ratingText: {
-    marginLeft: 4,
     fontSize: 14,
     color: '#666',
   },
-  status: {
-    paddingHorizontal: 8,
+  missionMeta: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+  },
+  statusText: {
     fontSize: 12,
     fontWeight: '600',
-  },
-  statusCompleted: {
-    backgroundColor: '#E8F5E9',
-    color: '#2E7D32',
   },
   serviceInfo: {
     marginBottom: 16,
@@ -380,5 +407,44 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#0A1F44',
+  },
+  tagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 6,
+  },
+  tagText: {
+    fontSize: 12,
+    color: '#2563EB',
+    fontWeight: '600',
+  },
+  loadingState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    color: '#475569',
+  },
+  retryButton: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  retryText: {
+    color: '#FFF',
+    fontWeight: '600',
   },
 });

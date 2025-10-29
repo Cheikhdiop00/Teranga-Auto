@@ -229,6 +229,14 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 40,
+    backgroundColor: '#007AFF',
+    marginHorizontal: -20,
+    marginTop: -20,
+    paddingTop: 60,
+    paddingBottom: 30,
+    paddingHorizontal: 20,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
   },
   logo: {
     width: 120,
@@ -237,7 +245,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: '#0A1F44',
+    color: '#E5F1FF',
   },
   form: {
     width: '100%',
@@ -264,7 +272,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 24,
     textAlign: 'center',
-    color: '#0A1F44',
+    color: '#007AFF',
   },
   input: {
     backgroundColor: '#F5F5F5',
@@ -285,7 +293,7 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   button: {
-    backgroundColor: '#0A1F44',
+    backgroundColor: '#34C759',
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',

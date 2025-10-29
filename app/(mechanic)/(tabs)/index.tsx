@@ -1037,17 +1037,17 @@ export default function MechanicHomeScreen() {
         </View>
       </View>
 
-      {/* Bannière publicitaire */}
-      <View style={styles.adBanner}>
-        <Image 
-          source={require('../../../assets/images/Futuristic Teranga Auto Logo.png')} 
-          style={styles.adImage}
-          resizeMode="contain"
-        />
-        <Text style={styles.adText}>20% de réduction sur la révision complète</Text>
-      </View>
-
       <ScrollView style={styles.content}>
+        {/* Carte de bienvenue */}
+        <View style={styles.welcomeCard}>
+          <Text style={styles.welcomeText}>
+            Bonjour, {profile?.first_name} !
+          </Text>
+          <Text style={styles.welcomeSubtext}>
+            Gérez vos missions et votre disponibilité
+          </Text>
+        </View>
+
         <View style={styles.statusCard}>
           <View style={styles.statusHeader}>
             <View>
@@ -1337,11 +1337,11 @@ export default function MechanicHomeScreen() {
 
       {/* Bouton flottant pour la messagerie */}
       <TouchableOpacity
-        style={[styles.floatingButton, { backgroundColor: '#0A1F44' }]}
+        style={[styles.floatingButton, { backgroundColor: '#007AFF' }]}
         onPress={() => router.push('/(mechanic)/(tabs)/messages' as any)}
         activeOpacity={0.8}
       >
-        <MessageCircle size={28} color="#22C55E" />
+        <MessageCircle size={28} color="#FFFFFF" />
       </TouchableOpacity>
     </View>
   );
@@ -1359,15 +1359,14 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 16,
     paddingHorizontal: 16,
-    backgroundColor: '#0A1F44',
+    backgroundColor: '#007AFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#0A1F44',
+    borderBottomColor: '#0066DD',
   },
   headerButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#0A1F44',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 8,
@@ -1437,38 +1436,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  adBanner: {
-    backgroundColor: '#0A1F44',
+  welcomeCard: {
+    backgroundColor: '#007AFF',
     marginHorizontal: 16,
     marginTop: 16,
     marginBottom: 8,
     padding: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
     borderRadius: 12,
-    height: 180,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 240, 255, 0.3)',
-    shadowColor: '#00F0FF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  adText: {
+  welcomeText: {
     color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: 12,
-    textShadowColor: 'rgba(0, 240, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 8,
+    fontWeight: '700',
+    fontSize: 20,
+    marginBottom: 4,
   },
-  adImage: {
-    width: 120,
-    height: 80,
-    marginBottom: 12,
+  welcomeSubtext: {
+    color: '#E5F1FF',
+    fontSize: 14,
   },
   statusCard: {
     backgroundColor: '#fff',
@@ -1876,8 +1865,8 @@ const styles = StyleSheet.create({
   },
   floatingButton: {
     position: 'absolute',
-    bottom: 24,
-    right: 24,
+    bottom: 95,
+    right: 16,
     width: 64,
     height: 64,
     borderRadius: 32,

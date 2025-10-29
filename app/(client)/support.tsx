@@ -1,211 +1,259 @@
-import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput } from 'react-native';
+import React, { useMemo } from 'react';
+import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Mail, Phone, Smartphone, Code2, Route, Database, Radio, Server, ArrowLeft } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import { Search, MessageCircle, X } from 'lucide-react-native';
-import { useAuth } from '@/contexts/AuthContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from '@/lib/supabase';
-import { API_URL } from '@/config/api';
+import { useClientTheme } from '@/contexts/ClientThemeContext';
+import type { ClientThemeColors } from '@/contexts/ClientThemeContext';
 
-interface Conversation {
-  id: string;
-  userName: string;
-  lastMessage: string;
-  lastMessageTime: string;
-  unreadCount: number;
-}
+const TECH_STACK = [
+  { label: 'React Native (Expo)', icon: Smartphone },
+  { label: 'TypeScript', icon: Code2 },
+  { label: 'Expo Router', icon: Route },
+  { label: 'MongoDB Atlas', icon: Database },
+  { label: 'Socket.io temps réel', icon: Radio },
+  { label: 'API Node.js/Express', icon: Server },
+];
+
+const CONTACT_NUMBERS = [
+  { label: 'Support Teranga Auto', number: '+221338891566' },
+  { label: 'Assistance générale', number: '+221778001010' },
+];
+
+const SUPPORT_EMAIL = 'support@teranga-auto.com';
 
 export default function ClientSupportScreen() {
   const router = useRouter();
-  const { profile } = useAuth();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<any[]>([]);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const { colors } = useClientTheme();
+  const techItems = useMemo(() => TECH_STACK, []);
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
-  useEffect(() => {
-    loadConversations();
-  }, []);
-
-  const loadConversations = async () => {
+  const openDialer = async (number: string) => {
     try {
-      const token = await AsyncStorage.getItem('authToken');
-      const res = await fetch(`${API_URL}/api/messages/conversations`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      if (!res.ok) throw new Error('Failed to load conversations');
-      const data = await res.json();
-      const convs: Conversation[] = (data.data || []).map((c: any) => {
-        const other = (c.participants || []).find((p: any) => (p._id || p.id) !== profile?.id) || {};
-        return {
-          id: c._id || c.id,
-          userName: other.firstName ? `${other.firstName} ${other.lastName || ''}`.trim() : 'Conversation',
-          lastMessage: c.lastMessage?.content || '',
-          lastMessageTime: c.lastMessage?.createdAt ? new Date(c.lastMessage.createdAt).toLocaleString() : '',
-          unreadCount: c.unreadCount || 0,
-        };
-      });
-      setConversations(convs);
-    } catch {
-      setConversations([]);
-    }
-  };
-
-  const searchMechanics = async () => {
-    try {
-      setLoading(true);
-      const list = await api.mechanics.list();
-      const q = searchQuery.trim().toLowerCase();
-      const filtered = (Array.isArray(list) ? list : []).filter((m: any) => {
-        const name = `${m.user?.firstName || m.firstName || ''} ${m.user?.lastName || m.lastName || ''}`.toLowerCase();
-        const phone = (m.user?.phoneNumber || m.phoneNumber || '').toLowerCase();
-        const specialties = (m.specialties || []).join(',').toLowerCase();
-        if (!q) return true;
-        return name.includes(q) || phone.includes(q) || specialties.includes(q);
-      });
-      setResults(filtered);
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const startConversation = async (participantId: string) => {
-    try {
-      const token = await AsyncStorage.getItem('authToken');
-      const res = await fetch(`${API_URL}/api/messages/conversations`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ participantId }),
-      });
-      if (!res.ok) throw new Error('Failed to start conversation');
-      const data = await res.json();
-      const conversationId = data?.data?._id || data?.data?.id;
-      if (conversationId) {
-        router.push(`/(client)/chat/${conversationId}` as any);
-      } else {
-        await loadConversations();
+      const sanitized = number.replace(/\s+/g, '');
+      const url = `tel:${sanitized}`;
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        Alert.alert('Appel impossible', `Composez le ${number} depuis votre téléphone.`);
+        return;
       }
-    } catch {}
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Appel impossible', `Composez le ${number} depuis votre téléphone.`);
+    }
   };
 
-  const deleteConversation = async (conversationId: string) => {
-    try {
-      const token = await AsyncStorage.getItem('authToken');
-      const res = await fetch(`${API_URL}/api/messages/conversations/${conversationId}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      if (!res.ok) throw new Error('Failed to delete conversation');
-      await loadConversations();
-    } catch {}
+  const openMail = async () => {
+    const url = `mailto:${SUPPORT_EMAIL}`;
+    const supported = await Linking.canOpenURL(url);
+    if (supported) {
+      await Linking.openURL(url);
+    } else {
+      Alert.alert('Email indisponible', `Écrivez-nous sur ${SUPPORT_EMAIL}`);
+    }
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Parler à un agent</Text>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.hero}>
+        <View style={styles.heroHeader}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Revenir en arrière"
+            style={styles.backButton}
+          >
+            <ArrowLeft color={colors.accentContrast} size={22} />
+          </TouchableOpacity>
+          <Text style={styles.title}>Support & assistance</Text>
+        </View>
         <Text style={styles.subtitle}>
-          Discutez directement avec un mécanicien ou l'équipe Teranga Auto.
+          Découvrez Teranga Auto, notre vision et la technologie qui alimente votre expérience au quotidien.
         </Text>
       </View>
 
-      <View style={styles.searchBar}>
-        <Search size={20} color="#666" style={{ marginRight: 8 }} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Rechercher un mécanicien (nom, téléphone, spécialité)"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        <TouchableOpacity onPress={() => { setSearchQuery(''); setResults([]); }}>
-          <X size={18} color="#666" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.searchButton} onPress={searchMechanics}>
-          <Text style={styles.searchButtonText}>{loading ? '...' : 'Rechercher'}</Text>
-        </TouchableOpacity>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>À propos de Teranga Auto</Text>
+        <Text style={styles.paragraph}>
+          Teranga Auto met en relation les automobilistes et les meilleurs mécaniciens du Sénégal, 24h/24. L’application
+          facilite la prise de rendez-vous, la localisation des professionnels et la communication en temps réel pour un
+          dépannage rapide et fiable.
+        </Text>
+        <Text style={styles.paragraph}>
+          Grâce à des notifications instantanées, un suivi de mission et un espace de discussion sécurisé, vous gardez le
+          contrôle de chaque intervention – du diagnostic jusqu’à la clôture du service.
+        </Text>
       </View>
 
-      {results.length > 0 && (
-        <View style={styles.resultsCard}>
-          {results.map((m: any, idx: number) => (
-            <View key={m._id || m.id || idx} style={styles.resultRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.resultName}>{`${m.user?.firstName || m.firstName || ''} ${m.user?.lastName || m.lastName || ''}`.trim() || 'Mécanicien'}</Text>
-                <Text style={styles.resultMeta}>{m.user?.phoneNumber || m.phoneNumber || '—'} • {(m.specialties || []).join(', ')}</Text>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Technologies utilisées</Text>
+        <View style={styles.techList}>
+          {techItems.map(({ label, icon: Icon }) => (
+            <View key={label} style={styles.techRow}>
+              <View style={styles.techIconWrapper}>
+                <Icon color={colors.accent} size={18} />
               </View>
-              <TouchableOpacity style={styles.chatBtn} onPress={() => startConversation(m.user?._id || m.user?.id || m._id || m.id)}>
-                <Text style={styles.chatBtnText}>Discuter</Text>
-              </TouchableOpacity>
+              <Text style={styles.techLabel}>{label}</Text>
             </View>
           ))}
         </View>
-      )}
+      </View>
 
-      <Text style={styles.sectionTitle}>Vos conversations</Text>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Contacter le support</Text>
+        <Text style={styles.paragraph}>
+          Nous répondons à vos questions commerciales et techniques du lundi au samedi (8h-20h).
+        </Text>
 
-      {conversations.length > 0 ? (
-        <FlatList
-          data={conversations}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <View style={styles.convItem}>
-              <TouchableOpacity style={{ flex: 1 }} onPress={() => router.push(`/(client)/chat/${item.id}` as any)}>
-                <Text style={styles.convName}>{item.userName}</Text>
-                <Text style={styles.convLast}>{item.lastMessage}</Text>
-                <Text style={styles.convTime}>{item.lastMessageTime}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => deleteConversation(item.id)}>
-                <Text style={styles.deleteText}>Supprimer</Text>
-              </TouchableOpacity>
+        {CONTACT_NUMBERS.map((contact) => (
+          <TouchableOpacity
+            key={contact.number}
+            style={styles.actionButton}
+            onPress={() => openDialer(contact.number)}
+            activeOpacity={0.85}
+          >
+            <Phone color={colors.accent} size={20} />
+            <View style={styles.actionTextWrapper}>
+              <Text style={styles.actionLabel}>{contact.label}</Text>
+              <Text style={styles.actionValue}>{contact.number}</Text>
             </View>
-          )}
-          contentContainerStyle={{ paddingBottom: 16 }}
-        />
-      ) : (
-        <View style={styles.empty}>
-          <MessageCircle size={64} color="#CCC" />
-          <Text style={styles.emptyTitle}>Aucune conversation</Text>
-          <Text style={styles.emptySub}>Recherchez un mécanicien pour démarrer une discussion</Text>
-        </View>
-      )}
-    </View>
+          </TouchableOpacity>
+        ))}
+
+        <TouchableOpacity style={styles.actionButton} onPress={openMail} activeOpacity={0.85}>
+          <Mail color={colors.accent} size={20} />
+          <View style={styles.actionTextWrapper}>
+            <Text style={styles.actionLabel}>Email</Text>
+            <Text style={styles.actionValue}>{SUPPORT_EMAIL}</Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F5F5' },
-  header: { paddingTop: 60, paddingBottom: 16, paddingHorizontal: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E0E0E0' },
-  title: { fontSize: 22, fontWeight: '700', color: '#000' },
-  subtitle: { fontSize: 14, color: '#4B5563', marginTop: 4 },
-  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', margin: 16, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#E0E0E0' },
-  searchInput: { flex: 1, fontSize: 16, color: '#000' },
-  searchButton: { marginLeft: 8, backgroundColor: '#0A1F44', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
-  searchButtonText: { color: '#fff', fontWeight: '600', fontSize: 12 },
-  resultsCard: { backgroundColor: '#fff', marginHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 12 },
-  resultRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  resultName: { fontSize: 14, fontWeight: '600', color: '#000' },
-  resultMeta: { fontSize: 12, color: '#666' },
-  chatBtn: { backgroundColor: '#0A1F44', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  chatBtnText: { color: '#FFF', fontWeight: '600' },
-  sectionTitle: { marginHorizontal: 16, marginTop: 8, marginBottom: 8, fontSize: 16, fontWeight: '600', color: '#000' },
-  convItem: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E0E0E0', flexDirection: 'row', alignItems: 'center', gap: 12 },
-  convName: { fontSize: 15, fontWeight: '600', color: '#000' },
-  convLast: { fontSize: 13, color: '#666', marginTop: 2 },
-  convTime: { fontSize: 11, color: '#999', marginTop: 2 },
-  deleteText: { color: '#FF3B30', fontWeight: '600' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#666', marginTop: 12 },
-  emptySub: { fontSize: 14, color: '#999', marginTop: 4, textAlign: 'center' },
-});
+const createStyles = (colors: ClientThemeColors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      padding: 20,
+      paddingBottom: 40,
+      gap: 20,
+    },
+    hero: {
+      backgroundColor: colors.accent,
+      borderRadius: 18,
+      padding: 20,
+      shadowColor: colors.accent,
+      shadowOpacity: 0.25,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 3,
+    },
+    heroHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 14,
+    },
+    backButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.4)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(255,255,255,0.12)',
+      marginRight: 12,
+    },
+    title: {
+      fontSize: 24,
+      fontWeight: '700',
+      color: colors.accentContrast,
+    },
+    subtitle: {
+      fontSize: 15,
+      color: 'rgba(255,255,255,0.9)',
+      lineHeight: 22,
+    },
+    card: {
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      padding: 18,
+      gap: 12,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 2,
+    },
+    cardTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    paragraph: {
+      fontSize: 14,
+      lineHeight: 21,
+      color: colors.textSecondary,
+    },
+    techList: {
+      gap: 8,
+    },
+    techRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceAlt,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    techIconWrapper: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    techLabel: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    actionButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    actionTextWrapper: {
+      flex: 1,
+    },
+    actionLabel: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    actionValue: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      marginTop: 2,
+    },
+  });

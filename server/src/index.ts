@@ -69,8 +69,9 @@ async function bootstrap() {
     await seedDemoData();
 
     const { server } = createApp();
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on http://localhost:${PORT}`);
+      console.log(`Server accessible on network at http://192.168.1.50:${PORT}`);
       console.log(`Swagger docs available at http://localhost:${PORT}/docs`);
       console.log(`WebSocket server ready for real-time messaging`);
     });

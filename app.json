@@ -8,6 +8,9 @@
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "android": {
+      "softwareKeyboardLayoutMode": "pan"
+    },
     "ios": {
       "supportsTablet": true
     },

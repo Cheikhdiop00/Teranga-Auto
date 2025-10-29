@@ -6,8 +6,20 @@ export default function ClientTabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#007AFF',
-        tabBarInactiveTintColor: '#8E8E93',
+        tabBarActiveTintColor: '#FFFFFF',
+        tabBarInactiveTintColor: '#B3D9FF',
+        tabBarStyle: {
+          backgroundColor: '#007AFF',
+          borderTopWidth: 1,
+          borderTopColor: '#0066DD',
+          paddingBottom: 40,
+          paddingTop: 4,
+          height: 90,
+        },
+        tabBarLabelStyle: {
+          fontSize: 10,
+          marginTop: 0,
+        },
       }}
     >
       <Tabs.Screen
@@ -27,7 +39,7 @@ export default function ClientTabsLayout() {
       <Tabs.Screen
         name="messages"
         options={{
-          title: 'Chatbot IA',
+          title: 'Messages',
           tabBarIcon: ({ color, size }) => <MessageCircle color={color} size={size} />,
         }}
       />

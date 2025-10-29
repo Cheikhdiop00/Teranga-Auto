@@ -248,7 +248,7 @@ export default function MechanicProfileScreen() {
             style={styles.saveButton}
             onPress={handleSave}
           >
-            <Text style={styles.editButtonText}>Enregistrer</Text>
+            <Text style={styles.saveButtonText}>Enregistrer</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity 
@@ -438,7 +438,7 @@ export default function MechanicProfileScreen() {
         </View>
 
         <TouchableOpacity style={styles.logoutButton} onPress={handleSignOut}>
-          <LogOut color="#FF3B30" size={20} />
+          <LogOut color="#FFFFFF" size={20} />
           <Text style={styles.logoutText}>Déconnexion</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -457,7 +457,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 15,
-    backgroundColor: '#0A1F44',
+    backgroundColor: '#007AFF',
     paddingTop: 60,
     width: '100%',
     position: 'relative',
@@ -505,11 +505,16 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     padding: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#34C759',
     borderRadius: 4,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#0A1F44',
+    borderColor: '#34C759',
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 16,
   },
   avatarContainer: {
     alignItems: 'center',
@@ -598,14 +603,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: '#34C759',
+    padding: 12,
+    borderRadius: 8,
     gap: 8,
   },
   logoutText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FF3B30',
+    color: '#FFFFFF',
   },
 });

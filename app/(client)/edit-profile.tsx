@@ -1,16 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, ScrollView, Image } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'expo-router';
+import { useClientTheme } from '@/contexts/ClientThemeContext';
+import type { ClientThemeColors } from '@/contexts/ClientThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/config/api';
 import { ArrowLeft, Save } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect } from 'react';
 
 export default function EditClientProfileScreen() {
   const { profile, updateProfile } = useAuth() as any;
   const router = useRouter();
+  const { colors } = useClientTheme();
   const [firstName, setFirstName] = useState(profile?.first_name || '');
   const [lastName, setLastName] = useState(profile?.last_name || '');
   const [phoneNumber, setPhoneNumber] = useState(profile?.phone || '');
@@ -98,74 +100,170 @@ export default function EditClientProfileScreen() {
     }
   };
 
+  const themedStyles = useMemo(() => createStyles(colors), [colors]);
+
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
-          <ArrowLeft color="#0A1F44" size={22} />
+    <View style={themedStyles.container}>
+      <View style={themedStyles.header}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Retour"
+          style={themedStyles.backButton}
+        >
+          <ArrowLeft color="#fff" size={20} />
         </TouchableOpacity>
-        <Text style={styles.title}>Modifier le profil</Text>
-        <View style={{ width: 22 }} />
+        <Text style={themedStyles.title}>Modifier le profil</Text>
+        <TouchableOpacity
+          style={[themedStyles.saveButton, saving && { opacity: 0.6 }]}
+          onPress={onSave}
+          disabled={saving}
+          accessibilityRole="button"
+          accessibilityLabel="Enregistrer les modifications"
+        >
+          <Save color="#fff" size={16} />
+          <Text style={themedStyles.saveButtonText}>{saving ? '...' : 'Enregistrer'}</Text>
+        </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView behavior={Platform.select({ ios: 'padding', android: undefined })} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <View style={styles.avatarContainer}>
-            <TouchableOpacity style={styles.avatar} onPress={pickImage} activeOpacity={0.8}>
+        <ScrollView contentContainerStyle={themedStyles.content} keyboardShouldPersistTaps="handled">
+          <View style={themedStyles.avatarContainer}>
+            <TouchableOpacity style={themedStyles.avatar} onPress={pickImage} activeOpacity={0.8}>
               {photo ? (
                 <Image source={{ uri: photo }} style={{ width: 96, height: 96, borderRadius: 48 }} />
               ) : (
-                <Text style={styles.avatarText}>
+                <Text style={themedStyles.avatarText}>
                   {(firstName || profile?.first_name || 'U')[0]}
                   {(lastName || profile?.last_name || '').toString().charAt(0)}
                 </Text>
               )}
             </TouchableOpacity>
-            <Text style={styles.avatarHint}>Touchez l’avatar pour changer la photo</Text>
+            <Text style={themedStyles.avatarHint}>Touchez l’avatar pour changer la photo</Text>
           </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Prénom</Text>
-            <TextInput style={styles.input} value={firstName} onChangeText={setFirstName} placeholder="Prénom" />
+          <View style={themedStyles.field}>
+            <Text style={themedStyles.label}>Prénom</Text>
+            <TextInput
+              style={themedStyles.input}
+              value={firstName}
+              onChangeText={setFirstName}
+              placeholder="Prénom"
+              placeholderTextColor={colors.textMuted}
+            />
           </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Nom</Text>
-            <TextInput style={styles.input} value={lastName} onChangeText={setLastName} placeholder="Nom" />
+          <View style={themedStyles.field}>
+            <Text style={themedStyles.label}>Nom</Text>
+            <TextInput
+              style={themedStyles.input}
+              value={lastName}
+              onChangeText={setLastName}
+              placeholder="Nom"
+              placeholderTextColor={colors.textMuted}
+            />
           </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Téléphone</Text>
-            <TextInput style={styles.input} value={phoneNumber} onChangeText={setPhoneNumber} placeholder="Téléphone" keyboardType="phone-pad" />
+          <View style={themedStyles.field}>
+            <Text style={themedStyles.label}>Téléphone</Text>
+            <TextInput
+              style={themedStyles.input}
+              value={phoneNumber}
+              onChangeText={setPhoneNumber}
+              placeholder="Téléphone"
+              keyboardType="phone-pad"
+              placeholderTextColor={colors.textMuted}
+            />
           </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Adresse</Text>
-            <TextInput style={styles.input} value={address} onChangeText={setAddress} placeholder="Adresse" />
+          <View style={themedStyles.field}>
+            <Text style={themedStyles.label}>Adresse</Text>
+            <TextInput
+              style={themedStyles.input}
+              value={address}
+              onChangeText={setAddress}
+              placeholder="Adresse"
+              placeholderTextColor={colors.textMuted}
+            />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      <View style={styles.footer}>
-        <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={onSave} disabled={saving}>
-          <Save color="#fff" size={18} />
-          <Text style={styles.saveText}>{saving ? 'Enregistrement...' : 'Enregistrer'}</Text>
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F5F5' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 60, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E0E0E0' },
-  iconBtn: { padding: 6 },
-  title: { fontSize: 20, fontWeight: '700', color: '#0A1F44' },
-  content: { padding: 16 },
-  avatarContainer: { alignItems: 'center', marginBottom: 16 },
-  avatar: { width: 96, height: 96, borderRadius: 48, backgroundColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 32, fontWeight: '700', color: '#0A1F44' },
-  avatarHint: { marginTop: 8, fontSize: 12, color: '#6B7280' },
-  field: { marginBottom: 14 },
-  label: { fontSize: 13, color: '#6B7280', marginBottom: 6 },
-  input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
-  footer: { backgroundColor: '#fff', padding: 12, borderTopWidth: 1, borderTopColor: '#E0E0E0' },
-  saveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#0A1F44', paddingVertical: 12, borderRadius: 10 },
-  saveText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-});
+const createStyles = (colors: ClientThemeColors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    header: {
+      paddingTop: 60,
+      paddingBottom: 20,
+      paddingHorizontal: 20,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.accent,
+      gap: 12,
+    },
+    backButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.4)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(255,255,255,0.12)',
+    },
+    title: {
+      flex: 1,
+      fontSize: 22,
+      fontWeight: '700',
+      textAlign: 'center',
+      color: colors.accentContrast,
+    },
+    saveButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 12,
+      height: 34,
+      borderRadius: 17,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.4)',
+      backgroundColor: 'rgba(255,255,255,0.16)',
+    },
+    saveButtonText: {
+      color: colors.accentContrast,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    content: {
+      padding: 20,
+      gap: 20,
+    },
+    avatarContainer: { alignItems: 'center', marginBottom: 16 },
+    avatar: {
+      width: 96,
+      height: 96,
+      borderRadius: 48,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    avatarText: { fontSize: 32, fontWeight: '700', color: colors.textPrimary },
+    avatarHint: { marginTop: 8, fontSize: 12, color: colors.textSecondary },
+    field: { marginBottom: 14 },
+    label: { fontSize: 13, color: colors.textSecondary, marginBottom: 6 },
+    input: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 15,
+      color: colors.textPrimary,
+    },
+  });

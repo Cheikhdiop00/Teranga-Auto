@@ -82,11 +82,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const userId = await AsyncStorage.getItem('userId');
       const userEmail = await AsyncStorage.getItem('userEmail');
       
+      console.log('🔐 checkAuth - Token présent:', !!token, 'UserId:', !!userId);
+      
       if (token && userId) {
         setSession({ userId });
         setUser({ id: userId, email: userEmail || '' });
         loadProfile(userId);
       } else {
+        console.log('❌ Aucun token trouvé - utilisateur non connecté');
         setLoading(false);
       }
     } catch (error) {
@@ -103,6 +106,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       const token = await AsyncStorage.getItem('authToken');
+      console.log('🔍 loadProfile - API_BASE_URL:', API_BASE_URL);
+      console.log('🔍 loadProfile - Token présent:', !!token);
       const res = await fetch(`${API_BASE_URL}/auth/me`, {
         method: 'GET',
         headers: {

@@ -1,9 +1,12 @@
 import { Stack } from 'expo-router';
+import { ClientThemeProvider } from '@/contexts/ClientThemeContext';
 
 export default function ClientLayout() {
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(tabs)" />
-    </Stack>
+    <ClientThemeProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+      </Stack>
+    </ClientThemeProvider>
   );
 }

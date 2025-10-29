@@ -15,7 +15,13 @@ import {
   TextInput,
   ActivityIndicator,
   Image,
+  Switch,
+  Platform,
+  TouchableWithoutFeedback,
+  Dimensions,
+  SafeAreaView,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import {
   Menu,
@@ -35,8 +41,14 @@ import {
   Phone,
   Mail,
   Navigation,
-  Board,
   UserRound,
+  Sun,
+  Moon,
+  Info,
+  AlertTriangle,
+  LogOut,
+  X,
+  Sparkles,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'expo-router';
@@ -45,6 +57,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/config/api';
 import { Profile } from '@/types/database';
 import { io, Socket } from 'socket.io-client';
+import IconImage from '@/assets/images/Icon.jpg';
+import { useClientTheme } from '@/contexts/ClientThemeContext';
+import type { ClientThemeColors } from '@/contexts/ClientThemeContext';
 
 type MechanicListItem = Profile & { userId?: string };
 
@@ -105,9 +120,12 @@ const normalizeMechanicSpecialties = (mechanic: any): string[] => {
   return unique.map((spec) => mapToKnownSpecialtyLabel(spec));
 };
 
+const defaultReportReasons = DEFAULT_CANCEL_REASONS;
+
 export default function ClientHomeScreen() {
-  const { profile } = useAuth();
+  const { profile, signOut } = useAuth();
   const router = useRouter();
+  const { isDarkMode, toggleTheme, colors } = useClientTheme();
   const [mechanics, setMechanics] = useState<MechanicListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState<string | null>(null);
@@ -132,6 +150,24 @@ export default function ClientHomeScreen() {
   const [submittingMissionAction, setSubmittingMissionAction] = useState(false);
   const [ratingPromptVisible, setRatingPromptVisible] = useState(false);
   const [ratingModalVisible, setRatingModalVisible] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [emergencyModalVisible, setEmergencyModalVisible] = useState(false);
+  const menuProgress = useRef(new Animated.Value(0)).current;
+  const drawerWidth = Math.min(Dimensions.get('window').width * 0.65, 260);
+  const menuTranslate = menuProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-drawerWidth, 0],
+  });
+  const styles = useMemo(() => createStyles(colors, isDarkMode), [colors, isDarkMode]);
+  const menuTheme = useMemo(
+    () => ({
+      background: colors.surface,
+      text: colors.textPrimary,
+      border: colors.border,
+      overlay: colors.overlay,
+    }),
+    [colors],
+  );
 
   useEffect(() => {
     loadMechanics();
@@ -145,6 +181,65 @@ export default function ClientHomeScreen() {
       useNativeDriver: true,
     }).start();
   }, [servicesAnimation]);
+
+  useEffect(() => {
+    Animated.timing(menuProgress, {
+      toValue: isMenuOpen ? 1 : 0,
+      duration: 200,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: true,
+    }).start();
+  }, [isMenuOpen, menuProgress]);
+
+  const handleToggleTheme = () => {
+    toggleTheme();
+  };
+
+  const emergencyContacts = useMemo(
+    () => [
+      { label: 'Police nationale', number: '17' },
+      { label: 'Gendarmerie', number: '800201251' },
+      { label: 'Sapeurs-pompiers', number: '18' },
+      { label: 'SAMU (Urgence médicale)', number: '800000707' },
+      { label: 'Sénécartes Assistance', number: '33 889 15 66' },
+    ],
+    [],
+  );
+
+  const handleOpenUrgence = () => {
+    setEmergencyModalVisible(true);
+    setIsMenuOpen(false);
+  };
+
+  const closeEmergencyModal = () => {
+    setEmergencyModalVisible(false);
+  };
+
+  const handleCallEmergency = async (number: string) => {
+    try {
+      const sanitized = number.replace(/\s+/g, '');
+      const url = `tel:${sanitized}`;
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Appel impossible', `Veuillez composer le ${number} depuis votre téléphone.`);
+      }
+    } catch {
+      Alert.alert('Appel impossible', `Veuillez composer le ${number} depuis votre téléphone.`);
+    }
+  };
+
+  const handleAbout = () => {
+    setIsMenuOpen(false);
+    Alert.alert('À propos', "Teranga Auto – Assistance mécanique 24/7.");
+  };
+
+  const handleSignOut = async () => {
+    setIsMenuOpen(false);
+    await signOut();
+    router.replace('/auth/login');
+  };
 
   useEffect(() => {
     (async () => {
@@ -410,54 +505,62 @@ export default function ClientHomeScreen() {
     setRequestModalVisible(true);
   };
 
+  const navigateToConversationWithParticipant = useCallback(
+    async (participantId?: string | null) => {
+      try {
+        if (!participantId) {
+          Alert.alert(
+            'Discussion impossible',
+            'Impossible de trouver le compte du mécanicien. Réessayez plus tard.',
+          );
+          return;
+        }
+
+        const token = await AsyncStorage.getItem('authToken');
+        if (!token) {
+          Alert.alert(
+            'Connexion requise',
+            'Veuillez vous reconnecter pour démarrer une discussion avec le mécanicien.',
+          );
+          return;
+        }
+
+        const res = await fetch(`${API_URL}/api/messages/conversations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ participantId }),
+        });
+
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({}));
+          throw new Error(error.message || 'Impossible de démarrer la conversation.');
+        }
+
+        const data = await res.json();
+        const payload = data?.data ?? data;
+        const conversationId = payload?._id || payload?.id || payload?.conversationId;
+        if (!conversationId) {
+          Alert.alert(
+            'Discussion créée',
+            'Conversation démarrée, mais impossible de récupérer son identifiant.',
+          );
+          return;
+        }
+
+        router.push(`/(client)/chat/${conversationId}` as any);
+      } catch (error: any) {
+        Alert.alert('Discussion impossible', error.message || 'Erreur inattendue.');
+      }
+    },
+    [API_URL, router],
+  );
+
   const startConversationWithMechanic = async (mechanic: MechanicListItem) => {
-    try {
-      const participantId = mechanic.userId || mechanic.id;
-      if (!participantId) {
-        Alert.alert(
-          'Discussion impossible',
-          'Impossible de trouver le compte du mécanicien. Réessayez plus tard.',
-        );
-        return;
-      }
-
-      const token = await AsyncStorage.getItem('authToken');
-      if (!token) {
-        Alert.alert(
-          'Connexion requise',
-          'Veuillez vous reconnecter pour démarrer une discussion avec le mécanicien.',
-        );
-        return;
-      }
-
-      const res = await fetch(`${API_URL}/api/messages/conversations`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ participantId }),
-      });
-
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(error.message || 'Impossible de démarrer la conversation.');
-      }
-
-      const data = await res.json();
-      const conversationId = data?.data?._id || data?.data?.id;
-      if (!conversationId) {
-        Alert.alert(
-          'Discussion créée',
-          'Conversation démarrée, mais impossible de récupérer son identifiant.',
-        );
-        return;
-      }
-
-      router.push(`/(client)/chat/${conversationId}` as any);
-    } catch (error: any) {
-      Alert.alert('Discussion impossible', error.message || 'Erreur inattendue.');
-    }
+    const participantId = mechanic.userId || mechanic.id;
+    await navigateToConversationWithParticipant(participantId);
   };
 
   const submitBreakdownRequest = async () => {
@@ -844,21 +947,181 @@ export default function ClientHomeScreen() {
     </Modal>
   );
 
+  const renderServiceCard = useCallback(
+    ({ item }: { item: (typeof MECHANIC_TYPES)[number] }) => {
+      const IconComponent = item.icon;
+      const isSelected = selectedType === item.label;
+      return (
+        <TouchableOpacity
+          style={[styles.serviceCard, isSelected && styles.serviceCardSelected]}
+          onPress={() => setSelectedType(isSelected ? null : item.label)}
+          activeOpacity={0.85}
+        >
+          <View style={[styles.serviceIcon, { backgroundColor: `${item.color}1A` }]}>
+            <IconComponent color={item.color} size={24} />
+          </View>
+          <Text style={styles.serviceLabel}>{item.label}</Text>
+        </TouchableOpacity>
+      );
+    },
+    [selectedType, styles],
+  );
+
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      {isMenuOpen ? (
+        <TouchableWithoutFeedback onPress={() => setIsMenuOpen(false)}>
+          <Animated.View style={[styles.drawerOverlay, { opacity: menuProgress }]}>
+            <Animated.View
+              style={[styles.drawerContainer, { width: drawerWidth, transform: [{ translateX: menuTranslate }] }]}
+            >
+              <LinearGradient
+                colors={['rgba(15,23,42,0.95)', 'rgba(10,18,35,0.85)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.drawer}
+              >
+                <View style={styles.drawerHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Image source={IconImage} style={styles.drawerLogo} />
+                    <View style={styles.drawerHeaderTexts}>
+                      <Text style={[styles.drawerTitle, { color: '#fff' }]}>Menu client</Text>
+                      <Text style={[styles.drawerSubtitle, { color: '#fff' }]}>Accès rapide</Text>
+                    </View>
+                  </View>
+                </View>
+
+              <View style={styles.drawerMenu}>
+                <TouchableOpacity
+                  style={styles.drawerItem}
+                  onPress={() => {
+                    setIsMenuOpen(false);
+                    router.push('/(client)/profile' as any);
+                  }}
+                >
+                  <View style={styles.drawerItemLeft}>
+                    <UserRound color="#fff" size={20} />
+                    <Text style={[styles.drawerItemText, { color: '#fff' }]}>Mon profil</Text>
+                  </View>
+                  <ChevronRight color="#fff" size={18} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.drawerItem} onPress={handleOpenUrgence}>
+                  <View style={styles.drawerItemLeft}>
+                    <AlertTriangle color="#fff" size={20} />
+                    <Text style={[styles.drawerItemText, { color: '#fff' }]}>Urgence</Text>
+                  </View>
+                  <ChevronRight color="#fff" size={18} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.drawerItem}
+                  onPress={() => {
+                    setIsMenuOpen(false);
+                    router.push('/(client)/support' as any);
+                  }}
+                >
+                  <View style={styles.drawerItemLeft}>
+                    <Info color="#fff" size={20} />
+                    <Text style={[styles.drawerItemText, { color: '#fff' }]}>Support</Text>
+                  </View>
+                  <ChevronRight color="#fff" size={18} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.drawerItem}
+                  onPress={() => handleToggleTheme()}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={isDarkMode ? 'Désactiver le thème sombre' : 'Activer le thème sombre'}
+                >
+                  <View style={styles.drawerItemLeft}>
+                    {isDarkMode ? (
+                      <Moon color="#fff" size={20} />
+                    ) : (
+                      <Sun color="#fff" size={20} />
+                    )}
+                    <Text style={[styles.drawerItemText, { color: '#fff' }]}>
+                      {isDarkMode ? 'Thème sombre' : 'Thème clair'}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={isDarkMode}
+                    onValueChange={handleToggleTheme}
+                    thumbColor="#ffffff"
+                    trackColor={{ false: '#E2E8F0', true: '#34C759' }}
+                    ios_backgroundColor="#E2E8F0"
+                    style={styles.drawerSwitch}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.drawerLogoutButton} onPress={handleSignOut} activeOpacity={0.85}>
+                  <LogOut color="#0A84FF" size={18} />
+                  <Text style={styles.drawerLogoutText}>Se déconnecter</Text>
+                </TouchableOpacity>
+              </View>
+              </LinearGradient>
+            </Animated.View>
+          </Animated.View>
+        </TouchableWithoutFeedback>
+      ) : null}
+
+      <Modal visible={emergencyModalVisible} animationType="slide" transparent onRequestClose={closeEmergencyModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.emergencyModal, { backgroundColor: colors.surface }]}> 
+            <View style={styles.emergencyHeader}>
+              <Text style={[styles.emergencyTitle, { color: colors.textPrimary }]}>Urgences Sénégal</Text>
+              <TouchableOpacity onPress={closeEmergencyModal} style={styles.emergencyClose}>
+                <X color={colors.textSecondary} size={20} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.emergencySubtitle, { color: colors.textSecondary }]}>Sélectionnez un numéro pour appeler immédiatement.</Text>
+            <View style={styles.emergencyList}>
+              {emergencyContacts.map((contact) => (
+                <TouchableOpacity
+                  key={contact.number}
+                  style={[styles.emergencyItem, { borderColor: colors.border }]}
+                  onPress={() => handleCallEmergency(contact.number)}
+                  activeOpacity={0.85}
+                >
+                  <View>
+                    <Text style={[styles.emergencyItemLabel, { color: colors.textPrimary }]}>{contact.label}</Text>
+                    <Text style={[styles.emergencyItemNumber, { color: colors.textSecondary }]}>{contact.number}</Text>
+                  </View>
+                  <Phone color={colors.accent} size={20} />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={[styles.emergencyFooterBtn, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+              onPress={closeEmergencyModal}
+            >
+              <Text style={[styles.emergencyFooterText, { color: colors.textPrimary }]}>Fermer</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerButton}>
-          <Menu color="#000" size={24} />
+        <TouchableOpacity
+          style={styles.headerButton}
+          onPress={() => setIsMenuOpen(true)}
+          accessibilityLabel="Ouvrir le menu client"
+        >
+          <Menu color={colors.accentContrast} size={24} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.logo}>TerangaAuto</Text>
           <TouchableOpacity style={styles.location} onPress={openMap} activeOpacity={0.8}>
-            <Text style={styles.locationPillText}>{locationText || 'Votre position'}</Text>
+            <View style={styles.locationRow}>
+              <MapPin size={14} color={colors.accent} />
+              <Text style={styles.locationPillText}>{locationText || 'Votre position'}</Text>
+            </View>
           </TouchableOpacity>
         </View>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerButton}>
-            <Bell color="#000" size={24} />
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={() => router.push('/(client)/messages' as any)}
+            accessibilityLabel="Accéder aux notifications"
+          >
+            <Bell color={colors.accentContrast} size={24} />
           </TouchableOpacity>
         </View>
       </View>
@@ -866,16 +1129,18 @@ export default function ClientHomeScreen() {
       <ScrollView
         style={styles.content}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={loadMechanics} />
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={loadMechanics}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+            titleColor={colors.textPrimary}
+          />
         }
       >
         <View style={styles.welcomeCard}>
-          <Text style={styles.welcomeText}>
-            Bonjour, {profile?.first_name} !
-          </Text>
-          <Text style={styles.welcomeSubtext}>
-            Trouvez un mécanicien près de chez vous
-          </Text>
+          <Text style={styles.welcomeText}>Bonjour, {profile?.first_name || 'Client'} !</Text>
+          <Text style={styles.welcomeSubtext}>Trouvez un mécanicien près de chez vous</Text>
         </View>
 
         <Animated.View
@@ -887,46 +1152,29 @@ export default function ClientHomeScreen() {
                 {
                   translateY: servicesAnimation.interpolate({
                     inputRange: [0, 1],
-                    outputRange: [24, 0],
+                    outputRange: [16, 0],
                   }),
                 },
               ],
             },
           ]}
         >
-          <Text style={styles.sectionTitle}>Services de dépannage</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Services de dépannage</Text>
+            {selectedType && (
+              <TouchableOpacity onPress={() => setSelectedType(null)}>
+                <Text style={styles.sectionSubtitle}>Effacer</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           <FlatList
             data={MECHANIC_TYPES}
             keyExtractor={(item) => item.label}
             numColumns={4}
             scrollEnabled={false}
+            renderItem={renderServiceCard}
             contentContainerStyle={styles.servicesGrid}
             columnWrapperStyle={styles.serviceRow}
-            renderItem={({ item }) => {
-              const Icon = item.icon;
-              const isSelected = selectedType === item.label;
-              return (
-                <TouchableOpacity
-                  style={[
-                    styles.serviceCard,
-                    isSelected && styles.serviceCardSelected,
-                  ]}
-                  onPress={() =>
-                    setSelectedType(isSelected ? null : item.label)
-                  }
-                >
-                  <View
-                    style={[
-                      styles.serviceIcon,
-                      { backgroundColor: item.color + '20' },
-                    ]}
-                  >
-                    <Icon color={item.color} size={24} />
-                  </View>
-                  <Text style={styles.serviceLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              );
-            }}
           />
         </Animated.View>
 
@@ -937,14 +1185,14 @@ export default function ClientHomeScreen() {
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholder="Rechercher un mécanicien"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={isDarkMode ? '#767C8A' : '#9CA3AF'}
               style={styles.searchInput}
               returnKeyType="search"
             />
           </View>
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color="#007AFF" />
+              <ActivityIndicator size="small" color={colors.accent} />
             </View>
           ) : filteredMechanics.length === 0 ? (
             <View style={styles.emptyState}>
@@ -960,14 +1208,11 @@ export default function ClientHomeScreen() {
                 <View style={styles.mechanicHeader}>
                   <View style={styles.mechanicAvatar}>
                     {mechanic.photo_url ? (
-                      <Image
-                        source={{ uri: mechanic.photo_url }}
-                        style={styles.mechanicAvatarImage}
-                      />
+                      <Image source={{ uri: mechanic.photo_url }} style={styles.mechanicAvatarImage} />
                     ) : (
                       <Text style={styles.mechanicAvatarText}>
-                        {mechanic.first_name[0]}
-                        {mechanic.last_name[0]}
+                        {(mechanic.first_name?.[0] || 'T').toUpperCase()}
+                        {(mechanic.last_name?.[0] || 'A').toUpperCase()}
                       </Text>
                     )}
                   </View>
@@ -976,48 +1221,22 @@ export default function ClientHomeScreen() {
                       {mechanic.first_name} {mechanic.last_name}
                     </Text>
                     <View style={styles.mechanicRating}>
-                      <Text style={styles.mechanicRatingText}>
-                        ⭐ {mechanic.rating_average.toFixed(1)}
-                      </Text>
-                      <Text style={styles.mechanicRatingCount}>
-                        ({mechanic.rating_count} avis)
-                      </Text>
+                      <Text style={styles.mechanicRatingText}>⭐ {mechanic.rating_average.toFixed(1)}</Text>
+                      <Text style={styles.mechanicRatingCount}>({mechanic.rating_count} avis)</Text>
                     </View>
                     <Text style={styles.mechanicSpecialties}>
-                      Spécialités :
-                      {' '}
-                      {mechanic.specialties && mechanic.specialties.length > 0
-                        ? mechanic.specialties.join(', ')
-                        : 'Non renseigné'}
+                      Spécialités : {mechanic.specialties?.length ? mechanic.specialties.join(', ') : 'Non renseigné'}
                     </Text>
-                    <Text style={styles.mechanicStatsText}>
-                      Missions réalisées : {mechanic.rating_count}
-                    </Text>
-                    {mechanic.address ? (
-                      <Text style={styles.mechanicAddress}>{mechanic.address}</Text>
-                    ) : null}
+                    <Text style={styles.mechanicStatsText}>Missions réalisées : {mechanic.rating_count}</Text>
+                    {mechanic.address ? <Text style={styles.mechanicAddress}>{mechanic.address}</Text> : null}
                     {typeof mechanic.latitude === 'number' && typeof mechanic.longitude === 'number' && (mechanic.latitude !== 0 || mechanic.longitude !== 0) ? (
-                      <Text style={styles.mechanicLocation}>
-                        Lat. {mechanic.latitude.toFixed(4)} · Lon. {mechanic.longitude.toFixed(4)}
-                      </Text>
+                      <Text style={styles.mechanicLocation}>Lat. {mechanic.latitude.toFixed(4)} · Lon. {mechanic.longitude.toFixed(4)}</Text>
                     ) : (
-                      <Text style={styles.mechanicLocationPending}>
-                        Coordonnées en attente
-                      </Text>
+                      <Text style={styles.mechanicLocationPending}>Coordonnées en attente</Text>
                     )}
                   </View>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      mechanic.is_available && styles.statusBadgeAvailable,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.statusText,
-                        mechanic.is_available && styles.statusTextAvailable,
-                      ]}
-                    >
+                  <View style={[styles.statusBadge, mechanic.is_available && styles.statusBadgeAvailable]}>
+                    <Text style={[styles.statusText, mechanic.is_available && styles.statusTextAvailable]}>
                       {mechanic.is_available ? 'Disponible' : 'Occupé'}
                     </Text>
                   </View>
@@ -1026,16 +1245,15 @@ export default function ClientHomeScreen() {
                   <TouchableOpacity
                     style={styles.actionButton}
                     onPress={() => startConversationWithMechanic(mechanic)}
+                    accessibilityLabel={`Contacter ${mechanic.first_name}`}
                   >
-                    <MessageCircle color="#007AFF" size={20} />
+                    <MessageCircle color={colors.accent} size={20} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.requestButton}
                     onPress={() => handleRequestService(mechanic)}
                   >
-                    <Text style={styles.requestButtonText}>
-                      Demander un service
-                    </Text>
+                    <Text style={styles.requestButtonText}>Demander un service</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1044,624 +1262,793 @@ export default function ClientHomeScreen() {
         </View>
       </ScrollView>
 
-      {/* Bouton flottant pour la messagerie humaine */}
       <TouchableOpacity
-        style={[styles.floatingButton, { backgroundColor: '#0A1F44' }]}
-        onPress={() => router.push('/(client)/support' as any)}
-        activeOpacity={0.8}
+        style={styles.floatingButton}
+        onPress={() => router.push('/(client)/ai-assistant' as any)}
+        accessibilityLabel="Ouvrir l’assistance IA"
+        activeOpacity={0.85}
       >
-        <MessageCircle color="#fff" size={22} />
-        <Text style={styles.floatingButtonLabel}>Parler à un agent</Text>
+        <Sparkles color={colors.accentContrast} size={22} />
+        <Text style={styles.floatingButtonLabel}>Assistant IA</Text>
       </TouchableOpacity>
-
-      <Modal
-        animationType="slide"
-        transparent
-        visible={requestModalVisible}
-        onRequestClose={closeRequestModal}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Décrire la panne</Text>
-            {selectedType ? (
-              <Text style={styles.modalSubtitle}>Service : {selectedType}</Text>
-            ) : null}
-            {selectedMechanic ? (
-              <Text style={styles.modalSubtitle}>
-                Mécanicien : {selectedMechanic.first_name} {selectedMechanic.last_name}
-              </Text>
-            ) : null}
-            <TextInput
-              style={[styles.modalInput, requestError && styles.modalInputError]}
-              placeholder="Ex: Panne moteur sur la VDN"
-              multiline
-              numberOfLines={4}
-              value={requestDescription}
-              onChangeText={(text) => {
-                setRequestDescription(text);
-                if (requestError) setRequestError(null);
-              }}
-              editable={!requestSubmitting}
-            />
-            {requestError ? (
-              <Text style={styles.modalError}>{requestError}</Text>
-            ) : null}
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonSecondary]}
-                onPress={closeRequestModal}
-                disabled={requestSubmitting}
-              >
-                <Text style={styles.modalButtonSecondaryText}>Annuler</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={submitBreakdownRequest}
-                disabled={requestSubmitting}
-              >
-                {requestSubmitting ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.modalButtonText}>Envoyer</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      {renderMissionModal()}
-      {renderReportModal()}
-      {renderRatingPrompt()}
-      {renderRatingModal()}
-    </View>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 60,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  headerButton: {
-    padding: 8,
-  },
-  headerCenter: {
-    alignItems: 'center',
-  },
-  logo: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  location: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  locationPillText: {
-    fontSize: 12,
-    color: '#666',
-  },
-  headerRight: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  content: {
-    flex: 1,
-  },
-  welcomeCard: {
-    backgroundColor: '#007AFF',
-    margin: 16,
-    padding: 20,
-    borderRadius: 12,
-  },
-  welcomeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  welcomeSubtext: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    color: '#000',
-  },
-  servicesGrid: {
-    paddingHorizontal: 16,
-  },
-  serviceRow: {
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  serviceCard: {
-    flex: 1,
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    marginHorizontal: 6,
-  },
-  serviceCardSelected: {
-    borderWidth: 2,
-    borderColor: '#007AFF',
-  },
-  serviceIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  serviceLabel: {
-    fontSize: 11,
-    textAlign: 'center',
-    color: '#333',
-  },
-  mechanicCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 16,
-    borderRadius: 12,
-  },
-  mechanicHeader: {
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-  mechanicAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#007AFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-    overflow: 'hidden',
-  },
-  mechanicAvatarImage: {
-    width: '100%',
-    height: '100%',
-  },
-  mechanicAvatarText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  mechanicInfo: {
-    flex: 1,
-  },
-  mechanicName: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  mechanicRating: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  mechanicRatingText: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginRight: 4,
-  },
-  mechanicRatingCount: {
-    fontSize: 12,
-    color: '#666',
-  },
-  mechanicSpecialties: {
-    fontSize: 12,
-    color: '#666',
-  },
-  mechanicStatsText: {
-    fontSize: 12,
-    color: '#4B5563',
-    marginTop: 2,
-  },
-  mechanicAddress: {
-    fontSize: 12,
-    color: '#4B5563',
-    marginTop: 4,
-  },
-  mechanicLocation: {
-    marginTop: 4,
-    fontSize: 12,
-    color: '#1E3A8A',
-    fontWeight: '500',
-  },
-  mechanicLocationPending: {
-    marginTop: 4,
-    fontSize: 12,
-    color: '#9CA3AF',
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: '#FFE5E5',
-    alignSelf: 'flex-start',
-  },
-  statusBadgeAvailable: {
-    backgroundColor: '#E5F5E5',
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#FF3B30',
-  },
-  statusTextAvailable: {
-    color: '#34C759',
-  },
-  mechanicActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#F5F5F5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  requestButton: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  requestButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  loadingContainer: {
-    paddingVertical: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchContainer: {
-    marginVertical: 12,
-    marginHorizontal: 4,
-  },
-  searchInput: {
-    height: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    paddingHorizontal: 14,
-    fontSize: 14,
-    backgroundColor: '#fff',
-    color: '#111827',
-  },
-  emptyState: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-  },
-  missionModal: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    gap: 16,
-  },
-  mechanicInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  mechanicPhoto: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-  },
-  mechanicFallback: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#0A1F44',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mechanicFallbackText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  mechanicPhone: {
-    fontSize: 14,
-    color: '#4B5563',
-    marginTop: 2,
-  },
-  missionStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F1F5F9',
-    borderRadius: 12,
-    padding: 12,
-    gap: 12,
-  },
-  statBlock: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statBlockLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  statBlockValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0F172A',
-  },
-  statDivider: {
-    width: 1,
-    height: '70%',
-    backgroundColor: '#CBD5F5',
-  },
-  missionActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  continueButton: {
-    flex: 1,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#CBD5F5',
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  continueButtonText: {
-    color: '#1E40AF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  completeButton: {
-    flex: 1,
-    borderRadius: 10,
-    backgroundColor: '#16A34A',
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  completeButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  cancelButton: {
-    flex: 1,
-    borderRadius: 10,
-    backgroundColor: '#DC2626',
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cancelButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  ratingHint: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: '#EEF2FF',
-  },
-  ratingHintText: {
-    fontSize: 13,
-    color: '#312E81',
-    textAlign: 'center',
-  },
-  promptModal: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    gap: 16,
-    width: '90%',
-    maxWidth: 420,
-  },
-  ratingModal: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    gap: 16,
-    width: '90%',
-    maxWidth: 420,
-  },
-  promptActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  promptButton: {
-    flex: 1,
-  },
-  disabledButton: {
-    opacity: 0.6,
-  },
-  sectionSubtitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0A1F44',
-  },
-  starsRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 12,
-    paddingVertical: 12,
-  },
-  star: {
-    fontSize: 32,
-    fontWeight: '700',
-    marginHorizontal: 4,
-  },
-  starActive: {
-    color: '#F59E0B',
-  },
-  starInactive: {
-    color: '#D1D5DB',
-  },
-  reportModal: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    gap: 16,
-  },
-  checkboxList: {
-    gap: 8,
-  },
-  checkboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#CBD5F5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-  },
-  checkboxChecked: {
-    backgroundColor: '#1E40AF',
-    borderColor: '#1E40AF',
-  },
-  checkboxMark: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  checkboxLabel: {
-    fontSize: 14,
-    color: '#1F2937',
-    flex: 1,
-  },
-  floatingButton: {
-    position: 'absolute',
-    bottom: 24,
-    right: 24,
-    paddingHorizontal: 20,
-    height: 56,
-    borderRadius: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  floatingButtonLabel: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    gap: 12,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#0A1F44',
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: '#4B5563',
-  },
-  modalInput: {
-    minHeight: 100,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    padding: 12,
-    textAlignVertical: 'top',
-    fontSize: 14,
-    color: '#111827',
-  },
-  modalInputError: {
-    borderColor: '#F87171',
-  },
-  modalError: {
-    fontSize: 12,
-    color: '#DC2626',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-  },
-  modalButton: {
-    minWidth: 110,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#007AFF',
-  },
-  modalButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  modalButtonSecondary: {
-    backgroundColor: '#E5E7EB',
-  },
-  modalButtonSecondaryText: {
-    color: '#1F2937',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-});
+const createStyles = (colors: ClientThemeColors, isDarkMode: boolean) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingTop: 22,
+      paddingBottom: 14,
+      paddingHorizontal: 16,
+      backgroundColor: colors.accent,
+      borderBottomWidth: 0,
+    },
+    headerButton: {
+      padding: 8,
+    },
+    headerCenter: {
+      alignItems: 'center',
+    },
+    logo: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: colors.accentContrast,
+      marginTop: 6,
+    },
+    location: {
+      marginTop: 6,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+      borderColor: 'rgba(255,255,255,0.35)',
+      borderWidth: 1,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+    },
+    locationRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    locationPillText: {
+      fontSize: 12,
+      color: colors.accentContrast,
+    },
+    headerRight: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    themeSwitchContainer: {
+      paddingVertical: 2,
+      paddingHorizontal: 6,
+      borderRadius: 14,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    content: {
+      flex: 1,
+    },
+    welcomeCard: {
+      backgroundColor: colors.accent,
+      margin: 16,
+      padding: 20,
+      borderRadius: 12,
+      shadowColor: colors.accent,
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.2,
+      shadowRadius: 18,
+      elevation: 6,
+    },
+    welcomeText: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: colors.accentContrast,
+      marginBottom: 4,
+    },
+    welcomeSubtext: {
+      fontSize: 14,
+      color: colors.accentContrast,
+      opacity: 0.9,
+    },
+    section: {
+      marginBottom: 24,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginHorizontal: 16,
+      marginBottom: 12,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    servicesGrid: {
+      paddingHorizontal: 16,
+    },
+    serviceRow: {
+      justifyContent: 'space-between',
+      marginBottom: 12,
+    },
+    serviceCard: {
+      flex: 1,
+      alignItems: 'center',
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      marginHorizontal: 6,
+    },
+    serviceCardSelected: {
+      borderWidth: 2,
+      borderColor: colors.accent,
+      shadowColor: colors.accent,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.15,
+      shadowRadius: 12,
+      elevation: 4,
+    },
+    serviceIcon: {
+      width: 50,
+      height: 50,
+      borderRadius: 25,
+      backgroundColor: isDarkMode ? 'rgba(77,163,255,0.15)' : '#F1F5F9',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 8,
+    },
+    serviceLabel: {
+      fontSize: 11,
+      textAlign: 'center',
+      color: colors.textPrimary,
+      lineHeight: 16,
+    },
+    mechanicCard: {
+      backgroundColor: colors.surface,
+      marginHorizontal: 16,
+      marginBottom: 12,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      gap: 12,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.08,
+      shadowRadius: 10,
+    },
+    mechanicHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+    },
+    mechanicAvatar: {
+      width: 60,
+      height: 60,
+      borderRadius: 30,
+      backgroundColor: colors.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
+      overflow: 'hidden',
+    },
+    mechanicAvatarImage: {
+      width: '100%',
+      height: '100%',
+    },
+    mechanicAvatarText: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: colors.accentContrast,
+    },
+    mechanicInfo: {
+      flex: 1,
+    },
+    mechanicName: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      marginBottom: 4,
+    },
+    mechanicRating: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    mechanicRatingText: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.textPrimary,
+      marginRight: 4,
+    },
+    mechanicRatingCount: {
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    mechanicSpecialties: {
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    mechanicStatsText: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      marginTop: 2,
+    },
+    mechanicAddress: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      marginTop: 4,
+    },
+    mechanicLocation: {
+      marginTop: 4,
+      fontSize: 12,
+      color: colors.textPrimary,
+      fontWeight: '500',
+    },
+    mechanicLocationPending: {
+      marginTop: 4,
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    statusBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 4,
+      backgroundColor: isDarkMode ? 'rgba(255, 82, 82, 0.16)' : '#FFE5E5',
+      alignSelf: 'flex-start',
+    },
+    statusBadgeAvailable: {
+      backgroundColor: isDarkMode ? 'rgba(52, 199, 89, 0.18)' : '#E5F5E5',
+    },
+    statusText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: '#FF3B30',
+    },
+    statusTextAvailable: {
+      color: '#34C759',
+    },
+    mechanicActions: {
+      flexDirection: 'row',
+      gap: 16,
+      alignItems: 'center',
+    },
+    actionButton: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: isDarkMode ? colors.surfaceAlt : '#FFFFFF',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: isDarkMode ? colors.border : '#E5E7EB',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.06,
+      shadowRadius: 3,
+      elevation: 1,
+    },
+    requestButton: {
+      flex: 1,
+      backgroundColor: colors.accent,
+      borderRadius: 10,
+      paddingVertical: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    requestButtonText: {
+      color: colors.accentContrast,
+      fontSize: 15,
+      fontWeight: '700',
+      letterSpacing: 0.3,
+    },
+    loadingContainer: {
+      paddingVertical: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    searchContainer: {
+      marginVertical: 12,
+      marginHorizontal: 4,
+    },
+    searchInput: {
+      height: 44,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 14,
+      fontSize: 14,
+      backgroundColor: colors.surface,
+      color: colors.textPrimary,
+    },
+    emptyState: {
+      padding: 40,
+      alignItems: 'center',
+      gap: 12,
+    },
+    emptyStateText: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+    },
+    missionModal: {
+      width: '100%',
+      maxWidth: 420,
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      padding: 20,
+      gap: 16,
+    },
+    mechanicInfoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    mechanicPhoto: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+    },
+    mechanicFallback: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: colors.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    mechanicFallbackText: {
+      color: colors.accentContrast,
+      fontSize: 20,
+      fontWeight: '700',
+    },
+    mechanicPhone: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      marginTop: 2,
+    },
+    missionStats: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: isDarkMode ? colors.surfaceAlt : '#F1F5F9',
+      borderRadius: 12,
+      padding: 12,
+      gap: 12,
+    },
+    statDivider: {
+      width: 1,
+      height: '100%',
+      backgroundColor: colors.border,
+      opacity: 0.4,
+    },
+    statBlock: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    statBlockLabel: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      marginBottom: 4,
+    },
+    statBlockValue: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.accent,
+    },
+    missionActions: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    continueButton: {
+      flex: 1,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingVertical: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    continueButtonText: {
+      color: colors.accent,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    completeButton: {
+      flex: 1,
+      borderRadius: 10,
+      backgroundColor: colors.accent,
+      paddingVertical: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    completeButtonText: {
+      color: colors.accentContrast,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    cancelButton: {
+      flex: 1,
+      borderRadius: 10,
+      backgroundColor: colors.surfaceAlt,
+      paddingVertical: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    cancelButtonText: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    ratingHint: {
+      marginTop: 12,
+      padding: 12,
+      borderRadius: 10,
+      backgroundColor: isDarkMode ? 'rgba(77,163,255,0.12)' : '#EEF2FF',
+    },
+    ratingHintText: {
+      fontSize: 13,
+      color: colors.textPrimary,
+      textAlign: 'center',
+    },
+    promptModal: {
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      padding: 20,
+      gap: 16,
+      width: '90%',
+      maxWidth: 420,
+    },
+    ratingModal: {
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      padding: 20,
+      gap: 16,
+      width: '90%',
+      maxWidth: 420,
+    },
+    promptActions: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    promptButton: {
+      flex: 1,
+    },
+    disabledButton: {
+      opacity: 0.6,
+    },
+    sectionSubtitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.accent,
+    },
+    starsRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 12,
+      paddingVertical: 12,
+    },
+    star: {
+      fontSize: 32,
+      fontWeight: '700',
+      marginHorizontal: 4,
+    },
+    starActive: {
+      color: '#F59E0B',
+    },
+    starInactive: {
+      color: colors.textSecondary,
+    },
+    reportModal: {
+      width: '100%',
+      maxWidth: 420,
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      padding: 20,
+      gap: 16,
+    },
+    checkboxList: {
+      gap: 8,
+    },
+    checkboxRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    checkbox: {
+      width: 20,
+      height: 20,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+    },
+    checkboxChecked: {
+      backgroundColor: colors.accent,
+      borderColor: colors.accent,
+    },
+    checkboxMark: {
+      color: colors.accentContrast,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    checkboxLabel: {
+      fontSize: 14,
+      color: colors.textPrimary,
+      flex: 1,
+    },
+    commentInput: {
+      minHeight: 100,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      padding: 12,
+      textAlignVertical: 'top',
+      fontSize: 14,
+      backgroundColor: colors.surface,
+      color: colors.textPrimary,
+    },
+    floatingButton: {
+      position: 'absolute',
+      bottom: 80,
+      right: 16,
+      paddingHorizontal: 20,
+      height: 56,
+      borderRadius: 28,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: colors.accent,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 8,
+    },
+    floatingButtonLabel: {
+      color: colors.accentContrast,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    drawerOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      backgroundColor: 'rgba(2, 6, 23, 0.4)',
+      zIndex: 100,
+    },
+    drawerContainer: {
+      borderRadius: 24,
+      overflow: 'hidden',
+      shadowColor: '#020617',
+      shadowOpacity: 0.25,
+      shadowOffset: { width: 0, height: 12 },
+      shadowRadius: 22,
+      elevation: 6,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.1)',
+    },
+    drawer: {
+      height: '100%',
+      paddingTop: 32,
+      paddingBottom: 20,
+      paddingHorizontal: 20,
+      justifyContent: 'flex-start',
+      borderTopRightRadius: 24,
+      borderBottomRightRadius: 24,
+      backdropFilter: Platform.OS === 'web' ? 'blur(16px)' : undefined,
+    },
+    drawerHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 14,
+    },
+    drawerHeaderTexts: {
+      flex: 1,
+      marginLeft: 12,
+    },
+    drawerTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: '#fff',
+    },
+    drawerSubtitle: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: 'rgba(255,255,255,0.7)',
+    },
+    drawerLogo: {
+      width: 48,
+      height: 48,
+      borderRadius: 12,
+    },
+    drawerMenu: {
+      gap: 0,
+      marginTop: 4,
+    },
+    drawerItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(255,255,255,0.08)',
+    },
+    drawerItemLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    drawerItemLast: {
+      borderBottomWidth: 0,
+      paddingBottom: 10,
+    },
+    drawerLogoutButton: {
+      marginTop: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+      paddingVertical: 14,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: 'rgba(10,132,255,0.35)',
+      backgroundColor: 'rgba(10,132,255,0.15)',
+    },
+    drawerLogoutText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: '#0A84FF',
+    },
+    drawerSwitch: {
+      transform: [{ scale: Platform.OS === 'android' ? 0.9 : 1 }],
+    },
+    drawerItemText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    emergencyModal: {
+      width: '90%',
+      maxWidth: 360,
+      borderRadius: 20,
+      padding: 20,
+      gap: 16,
+    },
+    emergencyHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    emergencyTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+    },
+    emergencySubtitle: {
+      fontSize: 13,
+      lineHeight: 18,
+    },
+    emergencyClose: {
+      padding: 6,
+    },
+    emergencyList: {
+      gap: 10,
+    },
+    emergencyItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderWidth: 1,
+      borderRadius: 14,
+      backgroundColor: isDarkMode ? colors.surfaceAlt : '#F8FAFC',
+    },
+    emergencyItemLabel: {
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    emergencyItemNumber: {
+      fontSize: 13,
+      marginTop: 2,
+    },
+    emergencyFooterBtn: {
+      borderWidth: 1,
+      borderRadius: 14,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    emergencyFooterText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'center',
+      paddingHorizontal: 24,
+    },
+    modalContent: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 20,
+      gap: 12,
+    },
+    modalTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    modalSubtitle: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    modalInput: {
+      minHeight: 100,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      padding: 12,
+      textAlignVertical: 'top',
+      fontSize: 14,
+      backgroundColor: colors.surface,
+      color: colors.textPrimary,
+    },
+    modalInputError: {
+      borderColor: '#F87171',
+    },
+    modalError: {
+      fontSize: 12,
+      color: '#DC2626',
+    },
+    modalActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 12,
+    },
+    modalButton: {
+      minWidth: 110,
+      paddingVertical: 12,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.accent,
+    },
+    modalButtonText: {
+      color: colors.accentContrast,
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    modalButtonSecondary: {
+      backgroundColor: colors.surfaceAlt,
+    },
+    modalButtonSecondaryText: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '500',
+    },
+  });

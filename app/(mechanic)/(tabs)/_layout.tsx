@@ -5,28 +5,22 @@ import { Home, History, MessageCircle, User } from 'lucide-react-native';
 export default function MechanicTabsLayout() {
   return (
     <>
-      {/* Sous-couche bleu foncé en bas pour remplir l'espace sous la tab bar flottante */}
-      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 80, backgroundColor: '#0A1F44' }} />
       <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#34C759',
-        tabBarInactiveTintColor: '#8E8E93',
+        tabBarActiveTintColor: '#FFFFFF',
+        tabBarInactiveTintColor: '#B3D9FF',
         tabBarStyle: {
-          backgroundColor: '#0A1F44',
-          borderTopWidth: 0,
-          paddingBottom: 8,
-          paddingTop: 6,
-          height: 60,
-          position: 'absolute',
-          bottom: 36,
-          left: 16,
-          right: 16,
-          borderRadius: 16,
+          backgroundColor: '#007AFF',
+          borderTopWidth: 1,
+          borderTopColor: '#0066DD',
+          paddingBottom: 40,
+          paddingTop: 4,
+          height: 90,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
-          marginBottom: 5,
+          fontSize: 10,
+          marginTop: 0,
         },
       }}
     >
