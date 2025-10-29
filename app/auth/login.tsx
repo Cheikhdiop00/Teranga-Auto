@@ -219,7 +219,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FFFFFF',
   },
   scrollContent: {
     flexGrow: 1,
@@ -229,14 +229,6 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 40,
-    backgroundColor: '#007AFF',
-    marginHorizontal: -20,
-    marginTop: -20,
-    paddingTop: 60,
-    paddingBottom: 30,
-    paddingHorizontal: 20,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
   },
   logo: {
     width: 120,
@@ -245,10 +237,18 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: '#E5F1FF',
+    color: '#6B7280',
   },
   form: {
     width: '100%',
+    gap: 16,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 24,
+    textAlign: 'center',
+    color: '#007AFF',
   },
   inputContainer: {
     marginBottom: 16,
@@ -266,13 +266,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 16,
     padding: 8,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 24,
-    textAlign: 'center',
-    color: '#007AFF',
   },
   input: {
     backgroundColor: '#F5F5F5',
@@ -293,7 +286,7 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   button: {
-    backgroundColor: '#34C759',
+    backgroundColor: '#007AFF',
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
@@ -317,15 +310,14 @@ const styles = StyleSheet.create({
     borderColor: '#E0E0E0',
   },
   googleButtonText: {
-    color: '#0A1F44',
+    color: '#007AFF',
     fontSize: 16,
     fontWeight: '600',
   },
   link: {
     textAlign: 'center',
-    marginTop: 16,
     fontSize: 14,
-    color: '#0A1F44',
+    color: '#374151',
   },
   linkBold: {
     color: '#0A1F44',

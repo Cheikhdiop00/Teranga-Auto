@@ -19,6 +19,8 @@ import { io, Socket } from 'socket.io-client';
 import { API_URL } from '@/config/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useClientTheme } from '@/contexts/ClientThemeContext';
+import type { ClientThemeColors } from '@/contexts/ClientThemeContext';
 
 type ChatMessage = {
   id: string;
@@ -34,6 +36,11 @@ export default function ClientChatScreen() {
   const router = useRouter();
   const { profile } = useAuth();
   const insets = useSafeAreaInsets();
+  const { colors } = useClientTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const sendIconColor = colors.accentContrast;
+  const sendIconDisabled = colors.textSecondary;
+  const placeholderColor = colors.textSecondary;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -244,7 +251,7 @@ export default function ClientChatScreen() {
         <View style={{ flex: 1 }}>
           <View style={styles.topBar}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-              <ArrowLeft color="#0A1F44" size={22} />
+              <ArrowLeft color={colors.textPrimary} size={22} />
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
               <Text style={styles.title}>{peerName || 'Discussion'}</Text>
@@ -283,11 +290,11 @@ export default function ClientChatScreen() {
             multiline
             autoFocus
             textAlignVertical="top"
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={placeholderColor}
             returnKeyType="send"
           />
           <TouchableOpacity style={styles.sendBtn} onPress={handleSend} disabled={!input.trim()}>
-            <Send color={input.trim() ? '#fff' : '#bbb'} size={18} />
+            <Send color={input.trim() ? sendIconColor : sendIconDisabled} size={18} />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -295,68 +302,83 @@ export default function ClientChatScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 36,
-    paddingBottom: 8,
-    paddingHorizontal: 16,
-    backgroundColor: '#F9FAFB',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
-  },
-  backBtn: { padding: 6, marginRight: 10 },
-  title: { fontSize: 16, fontWeight: '700', color: '#0A1F44' },
-  subtitle: { fontSize: 12, color: '#6B7280', marginTop: 2 },
-  message: {
-    maxWidth: '82%',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    marginVertical: 4,
-  },
-  messageOwn: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#0A1F44',
-    borderBottomRightRadius: 4,
-  },
-  messageOther: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#F1F5F9',
-    borderBottomLeftRadius: 4,
-  },
-  messageText: { fontSize: 15, color: '#111' },
-  messageTextOwn: { color: '#fff' },
-  messageTime: { fontSize: 10, color: '#9CA3AF', marginTop: 4, textAlign: 'right' },
-  inputBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#F9FAFB',
-    borderTopWidth: 1,
-    borderTopColor: '#EEE',
-  },
-  input: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 120,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-  },
-  sendBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#0A1F44',
-  },
-});
+const createStyles = (colors: ClientThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingTop: 28,
+      paddingBottom: 6,
+      paddingHorizontal: 16,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.06,
+      shadowRadius: 6,
+      elevation: 3,
+    },
+    backBtn: { padding: 6, marginRight: 10 },
+    title: { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
+    subtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+    message: {
+      maxWidth: '82%',
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      marginVertical: 4,
+      borderWidth: 1,
+    },
+    messageOwn: {
+      alignSelf: 'flex-end',
+      backgroundColor: colors.accent,
+      borderBottomRightRadius: 4,
+      borderColor: 'transparent',
+    },
+    messageOther: {
+      alignSelf: 'flex-start',
+      backgroundColor: colors.surfaceAlt,
+      borderBottomLeftRadius: 4,
+      borderColor: colors.cardBorder,
+    },
+    messageText: { fontSize: 15, color: colors.textPrimary },
+    messageTextOwn: { color: colors.accentContrast },
+    messageTime: { fontSize: 10, color: colors.textSecondary, marginTop: 4, textAlign: 'right' },
+    inputBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingTop: 8,
+      paddingHorizontal: 12,
+      backgroundColor: colors.surface,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      gap: 8,
+    },
+    input: {
+      flex: 1,
+      minHeight: 42,
+      maxHeight: 140,
+      backgroundColor: colors.surfaceAlt,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      color: colors.textPrimary,
+    },
+    sendBtn: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.accent,
+      shadowColor: colors.accent,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.24,
+      shadowRadius: 8,
+      elevation: 4,
+    },
+  });

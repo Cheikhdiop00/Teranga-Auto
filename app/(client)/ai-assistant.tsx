@@ -11,6 +11,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  StatusBar,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Paperclip, Send, Sparkles } from 'lucide-react-native';
@@ -185,20 +186,21 @@ export default function ClientAIAssistantScreen() {
 
   return (
     <SafeAreaView style={styles.screen}>
+      <StatusBar barStyle={colors.background === '#07070B' ? 'light-content' : 'dark-content'} />
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 18 : 0}
       >
-        <View style={styles.header}>
+        <View style={styles.headerGradient}>
           <View style={styles.headerContent}>
             <View style={styles.headerIcon}>
-              <Sparkles color={colors.accent} size={20} />
+              <Sparkles color={colors.accentContrast} size={22} />
             </View>
             <View style={styles.headerTextGroup}>
               <Text style={styles.headerTitle}>Assistant IA</Text>
               <Text style={styles.headerSubtitle}>
-                Obtenez des conseils instantanés pour vos besoins automobiles.
+                Obtenez des conseils instantanés et personnalisés pour vos trajets.
               </Text>
             </View>
           </View>
@@ -270,9 +272,10 @@ export default function ClientAIAssistantScreen() {
           </ScrollView>
         </View>
 
-        <View style={styles.footer}>
+        <View style={styles.footerSpacer} />
+        <View style={styles.floatingComposerShadow}>
           <View style={styles.composerCard}>
-            <View style={styles.imageAttachment}>
+            <View style={styles.composerAttachments}>
               <TouchableOpacity
                 style={styles.imagePickerButton}
                 onPress={handlePickImage}
@@ -284,23 +287,21 @@ export default function ClientAIAssistantScreen() {
                 <Paperclip color={colors.accent} size={18} />
               </TouchableOpacity>
               {selectedImage ? (
-                <View style={styles.imagePreviewWrapper}>
-                  <Image source={{ uri: selectedImage.uri }} style={styles.imagePreview} />
-                  <TouchableOpacity
-                    style={styles.removeImageButton}
-                    onPress={handleRemoveImage}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.removeImageLabel}>Retirer</Text>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity
+                  style={styles.previewChip}
+                  onPress={handleRemoveImage}
+                  activeOpacity={0.85}
+                >
+                  <Image source={{ uri: selectedImage.uri }} style={styles.previewThumbnail} />
+                  <Text style={styles.previewLabel}>Retirer</Text>
+                </TouchableOpacity>
               ) : null}
             </View>
             <View style={styles.composerRow}>
               <TextInput
                 style={[styles.input, styles.composerInput]}
                 multiline
-                placeholder="Écrivez votre message..."
+                placeholder="Décrivez votre besoin..."
                 placeholderTextColor={colors.textSecondary}
                 value={inputValue}
                 onChangeText={setInputValue}
@@ -333,13 +334,18 @@ const createStyles = (colors: ClientThemeColors) =>
       flex: 1,
       backgroundColor: colors.background,
     },
-    header: {
-      justifyContent: 'center',
-      backgroundColor: colors.surface,
+    headerGradient: {
+      paddingTop: 28,
       paddingHorizontal: 20,
-      paddingVertical: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
+      paddingBottom: 16,
+      backgroundColor: colors.surface,
+      borderBottomLeftRadius: 24,
+      borderBottomRightRadius: 24,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.08,
+      shadowRadius: 14,
+      elevation: 6,
     },
     headerContent: {
       flex: 1,
@@ -348,19 +354,23 @@ const createStyles = (colors: ClientThemeColors) =>
       gap: 12,
     },
     headerIcon: {
-      width: 44,
-      height: 44,
-      borderRadius: 12,
-      backgroundColor: colors.surface,
+      width: 46,
+      height: 46,
+      borderRadius: 16,
+      backgroundColor: colors.accent,
       alignItems: 'center',
       justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
     },
     headerTextGroup: {
       flex: 1,
       gap: 4,
     },
     headerTitle: {
-      fontSize: 20,
+      fontSize: 22,
       fontWeight: '700',
       color: colors.textPrimary,
     },
@@ -373,9 +383,10 @@ const createStyles = (colors: ClientThemeColors) =>
       flex: 1,
     },
     messagesContent: {
-      paddingHorizontal: 20,
-      paddingBottom: 24,
-      gap: 16,
+      paddingHorizontal: 16,
+      paddingVertical: 24,
+      paddingBottom: 120,
+      gap: 18,
     },
     messageRow: {
       flexDirection: 'row',
@@ -395,16 +406,25 @@ const createStyles = (colors: ClientThemeColors) =>
       backgroundColor: colors.accent,
       alignItems: 'center',
       justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.2,
+      shadowRadius: 4,
     },
     messageBubble: {
-      maxWidth: '80%',
-      borderRadius: 16,
+      maxWidth: '82%',
+      borderRadius: 18,
       paddingVertical: 12,
-      paddingHorizontal: 14,
-      gap: 8,
+      paddingHorizontal: 16,
+      gap: 6,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.08,
+      shadowRadius: 8,
+      elevation: 3,
     },
     assistantBubble: {
-      backgroundColor: colors.surfaceAlt,
+      backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.border,
     },
@@ -412,34 +432,31 @@ const createStyles = (colors: ClientThemeColors) =>
       backgroundColor: colors.accent,
     },
     messageBadge: {
-      alignSelf: 'flex-start',
-      borderRadius: 10,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
       fontSize: 11,
       fontWeight: '600',
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+      opacity: 0.8,
     },
     assistantBadge: {
-      backgroundColor: 'rgba(0,0,0,0.08)',
-      color: colors.textPrimary,
+      color: colors.accent,
     },
     userBadge: {
-      backgroundColor: 'rgba(255,255,255,0.25)',
       color: colors.accentContrast,
     },
-    messageMeta: {
-      fontSize: 12,
-      color: colors.textSecondary,
-    },
     messageText: {
-      fontSize: 14,
-      lineHeight: 20,
+      fontSize: 15,
+      lineHeight: 22,
     },
     assistantText: {
       color: colors.textPrimary,
     },
     userText: {
       color: colors.accentContrast,
+    },
+    messageMeta: {
+      fontSize: 12,
+      color: colors.textSecondary,
     },
     messageImage: {
       width: 180,
@@ -451,84 +468,72 @@ const createStyles = (colors: ClientThemeColors) =>
     typingRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
-      paddingHorizontal: 20,
-      paddingBottom: 12,
+      gap: 12,
+      marginTop: 6,
     },
     typingLabel: {
       fontSize: 13,
       color: colors.textSecondary,
     },
-    footer: {
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
-      backgroundColor: colors.background,
-      paddingTop: 12,
-      paddingBottom: Platform.OS === 'ios' ? 28 : 20,
-      gap: 12,
+    footerSpacer: {
+      height: 86,
+    },
+    floatingComposerShadow: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 20,
+      paddingHorizontal: 16,
+      zIndex: 10,
     },
     composerCard: {
-      marginHorizontal: 16,
-      padding: 14,
-      borderRadius: 18,
+      borderRadius: 22,
       backgroundColor: colors.surface,
+      padding: 14,
+      gap: 12,
       borderWidth: 1,
       borderColor: colors.border,
-      gap: 12,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 6 },
-      shadowOpacity: 0.06,
-      shadowRadius: 10,
-      elevation: 3,
+      shadowColor: '#111827',
+      shadowOpacity: 0.18,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 8,
     },
-    composerHint: {
-      fontSize: 12,
-      color: colors.textSecondary,
-    },
-    imageAttachment: {
+    composerAttachments: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: 12,
     },
     imagePickerButton: {
-      flexDirection: 'row',
-      gap: 8,
-      alignItems: 'center',
-      alignSelf: 'flex-start',
-      borderRadius: 12,
+      width: 40,
+      height: 40,
+      borderRadius: 14,
       borderWidth: 1,
-      borderColor: colors.accent,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      backgroundColor: 'rgba(0,122,255,0.08)',
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surfaceAlt,
     },
-    imagePickerLabel: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.accent,
-    },
-    imagePreviewWrapper: {
-      position: 'relative',
-      alignSelf: 'flex-start',
-    },
-    imagePreview: {
-      width: 200,
-      height: 132,
+    previewChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.surfaceAlt,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
       borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.border,
     },
-    removeImageButton: {
-      position: 'absolute',
-      top: 8,
-      right: 8,
-      backgroundColor: 'rgba(0,0,0,0.4)',
-      paddingHorizontal: 10,
-      paddingVertical: 4,
+    previewThumbnail: {
+      width: 32,
+      height: 32,
       borderRadius: 10,
     },
-    removeImageLabel: {
-      color: '#FFF',
-      fontSize: 11,
+    previewLabel: {
+      fontSize: 12,
       fontWeight: '600',
+      color: colors.textPrimary,
     },
     composerRow: {
       flexDirection: 'row',

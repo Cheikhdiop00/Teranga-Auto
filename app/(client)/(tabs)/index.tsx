@@ -49,6 +49,7 @@ import {
   LogOut,
   X,
   Sparkles,
+  Search,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'expo-router';
@@ -1160,12 +1161,15 @@ export default function ClientHomeScreen() {
           ]}
         >
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Services de dépannage</Text>
-            {selectedType && (
-              <TouchableOpacity onPress={() => setSelectedType(null)}>
-                <Text style={styles.sectionSubtitle}>Effacer</Text>
+            <View style={styles.sectionHeaderTitle}>
+              <Text style={styles.sectionTitle}>Services de dépannage</Text>
+              <Text style={styles.sectionDescription}>Choisissez une catégorie pour filtrer les mécaniciens.</Text>
+            </View>
+            {selectedType ? (
+              <TouchableOpacity style={styles.clearFilterButton} onPress={() => setSelectedType(null)}>
+                <Text style={styles.clearFilterLabel}>Effacer</Text>
               </TouchableOpacity>
-            )}
+            ) : null}
           </View>
           <FlatList
             data={MECHANIC_TYPES}
@@ -1179,16 +1183,24 @@ export default function ClientHomeScreen() {
         </Animated.View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Mécaniciens disponibles</Text>
+          <View style={styles.sectionHeaderAlt}>
+            <View style={styles.sectionHeaderTitle}>
+              <Text style={styles.sectionTitle}>Mécaniciens disponibles</Text>
+              <Text style={styles.sectionDescription}>Contactez un expert proche de vous ou lancez une demande.</Text>
+            </View>
+          </View>
           <View style={styles.searchContainer}>
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Rechercher un mécanicien"
-              placeholderTextColor={isDarkMode ? '#767C8A' : '#9CA3AF'}
-              style={styles.searchInput}
-              returnKeyType="search"
-            />
+            <View style={styles.searchField}>
+              <Search color={isDarkMode ? '#A5AEC0' : '#6B7280'} size={18} />
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Rechercher un mécanicien"
+                placeholderTextColor={isDarkMode ? 'rgba(10,132,255,0.7)' : 'rgba(10,132,255,0.75)'}
+                style={styles.searchInput}
+                returnKeyType="search"
+              />
+            </View>
           </View>
           {loading ? (
             <View style={styles.loadingContainer}>
@@ -1262,6 +1274,55 @@ export default function ClientHomeScreen() {
         </View>
       </ScrollView>
 
+      <Modal
+        visible={requestModalVisible && !!selectedMechanic}
+        animationType="slide"
+        transparent
+        onRequestClose={closeRequestModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Demande de service</Text>
+            <Text style={styles.modalSubtitle}>
+              {selectedMechanic
+                ? `Décrivez la panne pour ${selectedMechanic.first_name} ${selectedMechanic.last_name}`
+                : 'Décrivez la panne'}
+            </Text>
+            <TextInput
+              style={[styles.modalInput, requestError && styles.modalInputError]}
+              placeholder="Décrivez brièvement le problème rencontré"
+              placeholderTextColor={colors.textSecondary}
+              value={requestDescription}
+              onChangeText={(text) => {
+                setRequestDescription(text);
+                if (requestError) setRequestError(null);
+              }}
+              multiline
+              editable={!requestSubmitting}
+            />
+            {requestError ? <Text style={styles.modalError}>{requestError}</Text> : null}
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonSecondary]}
+                onPress={closeRequestModal}
+                disabled={requestSubmitting}
+              >
+                <Text style={[styles.modalButtonText, styles.modalButtonSecondaryText]}>Annuler</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, requestSubmitting && styles.disabledButton]}
+                onPress={submitBreakdownRequest}
+                disabled={requestSubmitting}
+              >
+                <Text style={styles.modalButtonText}>
+                  {requestSubmitting ? 'Envoi...' : 'Envoyer'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <TouchableOpacity
         style={styles.floatingButton}
         onPress={() => router.push('/(client)/ai-assistant' as any)}
@@ -1271,6 +1332,11 @@ export default function ClientHomeScreen() {
         <Sparkles color={colors.accentContrast} size={22} />
         <Text style={styles.floatingButtonLabel}>Assistant IA</Text>
       </TouchableOpacity>
+
+      {renderMissionModal()}
+      {renderReportModal()}
+      {renderRatingPrompt()}
+      {renderRatingModal()}
     </SafeAreaView>
   );
 }
@@ -1285,7 +1351,7 @@ const createStyles = (colors: ClientThemeColors, isDarkMode: boolean) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingTop: 22,
+      paddingTop: 32,
       paddingBottom: 14,
       paddingHorizontal: 16,
       backgroundColor: colors.accent,
@@ -1368,10 +1434,34 @@ const createStyles = (colors: ClientThemeColors, isDarkMode: boolean) =>
       marginHorizontal: 16,
       marginBottom: 12,
     },
+    sectionHeaderAlt: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+    },
+    sectionHeaderTitle: {
+      gap: 4,
+    },
     sectionTitle: {
       fontSize: 18,
       fontWeight: '600',
-      color: colors.textPrimary,
+      color: '#03245E',
+    },
+    sectionDescription: {
+      fontSize: 12,
+      color: '#03245E',
+    },
+    clearFilterButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: isDarkMode ? colors.surfaceAlt : '#F1F5FF',
+    },
+    clearFilterLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: '#03245E',
     },
     servicesGrid: {
       paddingHorizontal: 16,
@@ -1458,7 +1548,7 @@ const createStyles = (colors: ClientThemeColors, isDarkMode: boolean) =>
     mechanicName: {
       fontSize: 16,
       fontWeight: '600',
-      color: colors.textPrimary,
+      color: '#03245E',
       marginBottom: 4,
     },
     mechanicRating: {
@@ -1469,37 +1559,36 @@ const createStyles = (colors: ClientThemeColors, isDarkMode: boolean) =>
     mechanicRatingText: {
       fontSize: 14,
       fontWeight: '500',
-      color: colors.textPrimary,
-      marginRight: 4,
+      color: '#03245E',
     },
     mechanicRatingCount: {
       fontSize: 12,
-      color: colors.textSecondary,
+      color: '#03245E',
     },
     mechanicSpecialties: {
       fontSize: 12,
-      color: colors.textSecondary,
+      color: '#03245E',
     },
     mechanicStatsText: {
       fontSize: 12,
-      color: colors.textSecondary,
+      color: '#03245E',
       marginTop: 2,
     },
     mechanicAddress: {
       fontSize: 12,
-      color: colors.textSecondary,
+      color: '#03245E',
       marginTop: 4,
     },
     mechanicLocation: {
       marginTop: 4,
       fontSize: 12,
-      color: colors.textPrimary,
+      color: '#03245E',
       fontWeight: '500',
     },
     mechanicLocationPending: {
       marginTop: 4,
       fontSize: 12,
-      color: colors.textSecondary,
+      color: '#03245E',
     },
     statusBadge: {
       paddingHorizontal: 8,
@@ -1561,16 +1650,34 @@ const createStyles = (colors: ClientThemeColors, isDarkMode: boolean) =>
     searchContainer: {
       marginVertical: 12,
       marginHorizontal: 4,
+      alignItems: 'center',
+    },
+    searchField: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 14,
+      paddingVertical: 4,
+      shadowColor: '#020617',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.06,
+      shadowRadius: 10,
+      elevation: 2,
+      width: '92%',
+      maxWidth: 340,
     },
     searchInput: {
-      height: 44,
+      height: 36,
       borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.border,
-      paddingHorizontal: 14,
+      flex: 1,
+      borderWidth: 0,
+      paddingHorizontal: 0,
       fontSize: 14,
-      backgroundColor: colors.surface,
-      color: colors.textPrimary,
+      color: colors.accent,
     },
     emptyState: {
       padding: 40,
@@ -1593,8 +1700,14 @@ const createStyles = (colors: ClientThemeColors, isDarkMode: boolean) =>
       maxWidth: 420,
       backgroundColor: colors.surface,
       borderRadius: 16,
-      padding: 20,
-      gap: 16,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      gap: 12,
+      shadowColor: '#020617',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.12,
+      shadowRadius: 14,
+      elevation: 4,
     },
     mechanicInfoRow: {
       flexDirection: 'row',

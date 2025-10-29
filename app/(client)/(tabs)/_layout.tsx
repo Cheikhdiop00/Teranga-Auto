@@ -12,9 +12,9 @@ export default function ClientTabsLayout() {
           backgroundColor: '#007AFF',
           borderTopWidth: 1,
           borderTopColor: '#0066DD',
-          paddingBottom: 40,
-          paddingTop: 4,
-          height: 90,
+          paddingBottom: 24,
+          paddingTop: 6,
+          height: 84,
         },
         tabBarLabelStyle: {
           fontSize: 10,

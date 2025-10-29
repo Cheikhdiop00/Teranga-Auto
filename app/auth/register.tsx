@@ -116,7 +116,7 @@ export default function RegisterScreen() {
             disabled={loading}
             activeOpacity={0.7}
           >
-            <ArrowLeft color="#FFFFFF" size={16} />
+            <ArrowLeft color="#007AFF" size={16} />
           </TouchableOpacity>
           <Text style={styles.logo}>TerangaAuto</Text>
           <Text style={styles.subtitle}>Créer un compte</Text>
@@ -385,9 +385,16 @@ const styles = StyleSheet.create({
   },
   backButton: {
     position: 'absolute',
-    left: 0,
-    top: 0,
-    padding: 8,
+    left: 12,
+    top: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   logo: {
     fontSize: 36,
@@ -500,13 +507,11 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   button: {
-    backgroundColor: '#0A1F44',
+    backgroundColor: '#007AFF',
     borderRadius: 8,
     padding: 14,
     alignItems: 'center',
-    marginTop: 8,
-    height: 50,
-    justifyContent: 'center',
+    marginTop: 20,
   },
   buttonDisabled: {
     opacity: 0.6,

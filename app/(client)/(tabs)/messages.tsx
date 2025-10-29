@@ -5,6 +5,8 @@ import { API_URL } from '@/config/api';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { useClientTheme } from '@/contexts/ClientThemeContext';
+import type { ClientThemeColors } from '@/contexts/ClientThemeContext';
 
 type Conversation = {
   id: string;
@@ -38,6 +40,12 @@ export default function ClientMessagesScreen() {
   const router = useRouter();
   const { profile } = useAuth();
   const currentUserId = (profile as any)?._id || (profile as any)?.id;
+  const { colors } = useClientTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const placeholderColor = useMemo(
+    () => (colors.accentContrast === '#000000' ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)'),
+    [colors]
+  );
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -130,7 +138,7 @@ export default function ClientMessagesScreen() {
           <TextInput
             style={styles.searchInput}
             placeholder="Rechercher"
-            placeholderTextColor="rgba(255,255,255,0.7)"
+            placeholderTextColor={placeholderColor}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
@@ -142,7 +150,14 @@ export default function ClientMessagesScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderConversation}
         contentContainerStyle={styles.listContent}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadConversations} tintColor="#007AFF" />}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={loadConversations}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+          />
+        }
         ListEmptyComponent={
           !loading ? (
             <View style={styles.emptyState}>
@@ -156,121 +171,126 @@ export default function ClientMessagesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F4F6FB',
-  },
-  header: {
-    paddingTop: 28,
-    paddingBottom: 12,
-    paddingHorizontal: 18,
-    backgroundColor: '#0A84FF',
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 12,
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    height: 34,
-  },
-  searchInput: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 15,
-  },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 32,
-  },
-  conversationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    marginRight: 14,
-    backgroundColor: '#E6EEFF',
-  },
-  conversationContent: {
-    flex: 1,
-  },
-  conversationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  userName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0A1F44',
-    marginRight: 8,
-  },
-  time: {
-    fontSize: 12,
-    color: '#737A8C',
-  },
-  lastMessage: {
-    fontSize: 14,
-    color: '#4A4F62',
-  },
-  unreadBadge: {
-    minWidth: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#0A84FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 10,
-    paddingHorizontal: 6,
-  },
-  unreadCount: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  emptyState: {
-    paddingTop: 80,
-    alignItems: 'center',
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#0A1F44',
-    marginBottom: 6,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    paddingHorizontal: 32,
-  },
-});
+const createStyles = (colors: ClientThemeColors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    header: {
+      paddingTop: 28,
+      paddingBottom: 12,
+      paddingHorizontal: 18,
+      backgroundColor: colors.accent,
+      borderBottomLeftRadius: 20,
+      borderBottomRightRadius: 20,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.accentContrast,
+      marginBottom: 12,
+    },
+    searchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(255,255,255,0.18)',
+      borderRadius: 16,
+      paddingHorizontal: 12,
+      height: 36,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.3)',
+    },
+    searchInput: {
+      flex: 1,
+      color: colors.accentContrast,
+      fontSize: 15,
+    },
+    listContent: {
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 32,
+      gap: 12,
+    },
+    conversationItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 12,
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 4,
+      elevation: 1,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    avatar: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      marginRight: 14,
+      backgroundColor: colors.surfaceAlt,
+    },
+    conversationContent: {
+      flex: 1,
+    },
+    conversationHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    userName: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      marginRight: 8,
+    },
+    time: {
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    lastMessage: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    unreadBadge: {
+      minWidth: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: colors.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 10,
+      paddingHorizontal: 6,
+    },
+    unreadCount: {
+      color: colors.accentContrast,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    emptyState: {
+      paddingTop: 80,
+      alignItems: 'center',
+      gap: 8,
+    },
+    emptyTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    emptySubtitle: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      paddingHorizontal: 32,
+    },
+  });
