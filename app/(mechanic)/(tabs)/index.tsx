@@ -1,6 +1,6 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Alert, Switch, useColorScheme, Linking, ToastAndroid, Platform, Modal, FlatList, ActivityIndicator } from 'react-native';
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { Menu, Bell, MessageCircle, Search, MapPin } from 'lucide-react-native';
+import { View, Text, TouchableOpacity, TouchableWithoutFeedback, ScrollView, Image, Alert, Switch, Linking, ToastAndroid, Platform, Modal, FlatList, ActivityIndicator, StyleSheet } from 'react-native';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { Menu, Bell, MessageCircle, Search, MapPin, BarChart3, Trash2 } from 'lucide-react-native';
 import Sidebar from '@/components/Sidebar';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCollection } from '@/lib/supabase';
@@ -8,8 +8,11 @@ import { Service } from '@/types/database';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/config/api';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { io, Socket } from 'socket.io-client';
+import { Swipeable, RectButton, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useClientTheme } from '@/contexts/ClientThemeContext';
+import type { ClientThemeColors } from '@/contexts/ClientThemeContext';
 
 const parseJSONSafe = async (response: any) => {
   try {
@@ -26,9 +29,9 @@ const parseJSONSafe = async (response: any) => {
 export default function MechanicHomeScreen() {
   const router = useRouter();
   const { profile, updateProfile } = useAuth();
+  const { colors, isDarkMode } = useClientTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const colorScheme = useColorScheme();
-  const [isDarkMode, setIsDarkMode] = useState(colorScheme === 'dark');
   const [locationText, setLocationText] = useState<string>('');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locationGranted, setLocationGranted] = useState<boolean | null>(null);
@@ -36,19 +39,16 @@ export default function MechanicHomeScreen() {
   const [isAvailable, setIsAvailable] = useState(profile?.is_available || false);
   const socketRef = useRef<Socket | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState<number>(0);
+  const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const [ratingAverage, setRatingAverage] = useState<number>(profile?.rating_average ?? 0);
   const [ratingCount, setRatingCount] = useState<number>(profile?.rating_count ?? 0);
   const [notificationsModalVisible, setNotificationsModalVisible] = useState(false);
   const [pendingNotifications, setPendingNotifications] = useState<any[]>([]);
   const [markingNotifications, setMarkingNotifications] = useState(false);
+  const [removingNotificationId, setRemovingNotificationId] = useState<string | null>(null);
   const [complaintsDrawerVisible, setComplaintsDrawerVisible] = useState(false);
   const [complaints, setComplaints] = useState<any[]>([]);
   const [loadingComplaints, setLoadingComplaints] = useState(false);
-
-  const toggleTheme = () => {
-    setIsDarkMode(prev => !prev);
-    // Ici, vous pouvez ajouter la logique pour sauvegarder la préférence de thème
-  };
 
   const getAuthHeaders = useCallback(async () => {
     const token = await AsyncStorage.getItem('authToken');
@@ -58,6 +58,20 @@ export default function MechanicHomeScreen() {
     if (token) headers.Authorization = `Bearer ${token}`;
     return headers;
   }, []);
+
+  const resolvePhotoUrl = (raw?: unknown) => {
+    if (!raw) return undefined;
+    const url = typeof raw === 'string'
+      ? raw
+      : typeof raw === 'object' && raw !== null
+        ? (raw as any).url || (raw as any).path || (raw as any).uri || undefined
+        : undefined;
+    if (!url || typeof url !== 'string') return undefined;
+    if (/^https?:\/\//i.test(url)) return url;
+    if (url.startsWith('data:')) return url;
+    const base = API_URL.replace(/\/api$/, '');
+    return `${base}${url.startsWith('/') ? url : `/${url}`}`;
+  };
 
   const loadNearbyBreakdowns = async (lat: number, lng: number) => {
     try {
@@ -71,7 +85,12 @@ export default function MechanicHomeScreen() {
       const mapped: NearbyBreakdown[] = (data.data || []).map((item: any) => ({
         id: item.id,
         clientName: item.client?.name || item.clientName || 'Client',
-        clientPhoto: item.client?.photo || item.clientPhoto,
+        clientPhoto: resolvePhotoUrl(
+          item.client?.user?.profilePhoto ??
+          item.client?.photo ??
+          item.clientPhoto ??
+          item.client?.profilePhoto
+        ),
         clientPhone: item.client?.phone || item.clientPhone,
         clientUserId: item.client?.userId || item.clientUserId,
         description: item.description,
@@ -83,9 +102,13 @@ export default function MechanicHomeScreen() {
         status: item.status,
       }));
       setNearbyBreakdowns(mapped);
-      if (!incomingBreakdown && mapped.length > 0) {
-        setIncomingBreakdown(mapped[0]);
-      }
+      setIncomingBreakdown((prev) => {
+        if (!prev) {
+          return mapped[0] ?? null;
+        }
+        const updated = mapped.find((item) => item.id === prev.id);
+        return updated ?? prev;
+      });
     } catch (e) {
       setNearbyBreakdowns([]);
     }
@@ -126,16 +149,80 @@ export default function MechanicHomeScreen() {
         return;
       }
       const payload = await parseJSONSafe(res);
-      const items = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.data)
-          ? payload.data
-          : [];
+      if (Array.isArray(payload)) {
+        setUnreadNotifications(payload.length);
+        return;
+      }
+      const unreadFromPayload = Number(payload?.pagination?.unreadCount ?? payload?.unreadCount ?? 0);
+      if (Number.isFinite(unreadFromPayload)) {
+        setUnreadNotifications(unreadFromPayload);
+        return;
+      }
+      const items = Array.isArray(payload?.data) ? payload.data : [];
       setUnreadNotifications(items.length);
     } catch {
       setUnreadNotifications(0);
     }
   }, [API_URL, getAuthHeaders, profile]);
+
+  const refreshUnreadNotificationsCount = useCallback(async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${API_URL}/api/notifications/unread/count`, { headers });
+      if (!res.ok && res.status !== 304) {
+        return;
+      }
+      const payload = await parseJSONSafe(res);
+      const count = Number(payload?.count ?? payload?.data?.count ?? 0);
+      setUnreadNotifications(Number.isFinite(count) ? count : 0);
+    } catch {
+      // silent
+    }
+  }, [API_URL, getAuthHeaders]);
+
+  const handleDeleteNotification = useCallback(
+    async (notificationId?: string) => {
+      if (!notificationId) return;
+      try {
+        setRemovingNotificationId(notificationId);
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${API_URL}/api/notifications/${notificationId}`, {
+          method: 'DELETE',
+          headers,
+        });
+        if (!res.ok) {
+          const payload = await parseJSONSafe(res);
+          const message = payload?.message || 'Suppression impossible pour le moment.';
+          Alert.alert('Notifications', message);
+          return;
+        }
+        setPendingNotifications((prev) => prev.filter((item) => String(item?._id || item?.id) !== String(notificationId)));
+        await refreshUnreadNotificationsCount();
+      } catch (error) {
+        console.error('Unable to delete notification', error);
+        Alert.alert('Notifications', "Impossible de supprimer la notification.");
+      } finally {
+        setRemovingNotificationId(null);
+      }
+    },
+    [API_URL, getAuthHeaders, refreshUnreadNotificationsCount],
+  );
+
+  const fetchUnreadMessages = useCallback(async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${API_URL}/api/messages/unread-count`, { headers });
+      if (!res.ok && res.status !== 304) {
+        setUnreadMessages(0);
+        return;
+      }
+      const payload = await parseJSONSafe(res);
+      const total = Number(payload?.data?.totalUnread ?? payload?.totalUnread ?? 0);
+      setUnreadMessages(Number.isFinite(total) ? total : 0);
+    } catch {
+      setUnreadMessages(0);
+    }
+  }, [API_URL, getAuthHeaders]);
 
   const fetchComplaints = useCallback(async () => {
     try {
@@ -146,51 +233,24 @@ export default function MechanicHomeScreen() {
       }
       setLoadingComplaints(true);
       const headers = await getAuthHeaders();
-      const [notificationsRes, complaintsRes] = await Promise.all([
-        fetch(
-          `${API_URL}/api/notifications?${new URLSearchParams({
-            userId: String(currentUserId),
-            type: 'complaint',
-          }).toString()}`,
-          { headers },
-        ),
-        fetch(
-          `${API_URL}/api/complaints?${new URLSearchParams({
-            sort: '-createdAt',
-            limit: '50',
-          }).toString()}`,
-          { headers },
-        ),
-      ]);
-
-      const notificationsPayload = notificationsRes.ok || notificationsRes.status === 304 ? await parseJSONSafe(notificationsRes) : { data: [] };
-      const complaintsPayload = complaintsRes.ok || complaintsRes.status === 304 ? await parseJSONSafe(complaintsRes) : { data: [] };
-
-      const notificationsArray = Array.isArray(notificationsPayload)
-        ? notificationsPayload
-        : Array.isArray(notificationsPayload?.data)
-          ? notificationsPayload.data
+      const res = await fetch(
+        `${API_URL}/api/complaints?${new URLSearchParams({
+          sort: '-createdAt',
+          limit: '50',
+        }).toString()}`,
+        { headers },
+      );
+      if (!res.ok && res.status !== 304) {
+        setComplaints([]);
+        return;
+      }
+      const payload = await parseJSONSafe(res);
+      const complaintsArray = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.data)
+          ? payload.data
           : [];
-
-      const complaintsArray = Array.isArray(complaintsPayload)
-        ? complaintsPayload
-        : Array.isArray(complaintsPayload?.data)
-          ? complaintsPayload.data
-          : [];
-
-      const enriched = complaintsArray.map((complaint: any) => {
-        const relatedNotification = notificationsArray.find((notif: any) => {
-          const notifComplaintId = notif?.metadata?.complaintId || notif?.complaintId;
-          return notifComplaintId && String(notifComplaintId) === String(complaint?._id);
-        });
-
-        return {
-          ...complaint,
-          notification: relatedNotification,
-        };
-      });
-
-      setComplaints(enriched);
+      setComplaints(complaintsArray);
     } catch (error) {
       console.error('Unable to fetch complaints', error);
       setComplaints([]);
@@ -200,45 +260,8 @@ export default function MechanicHomeScreen() {
   }, [API_URL, getAuthHeaders, profile]);
 
   const openComplaintsDrawer = useCallback(() => {
-    setComplaintsDrawerVisible(true);
-    fetchComplaints();
-  }, [fetchComplaints]);
-
-  const closeComplaintsDrawer = useCallback(() => {
     setComplaintsDrawerVisible(false);
   }, []);
-
-  const renderComplaintItem = useCallback(
-    ({ item }: { item: any }) => {
-      const notification = item?.notification;
-      const isUnread = notification ? !notification.read : false;
-      const timestamp = notification?.sentAt || item?.createdAt;
-      const formattedDate = timestamp ? new Date(timestamp).toLocaleString() : '';
-      const title = notification?.title || 'Signalement client';
-
-      return (
-        <View style={styles.complaintItem}>
-          <View style={styles.complaintHeaderRow}>
-            <View style={styles.complaintTitleWrapper}>
-              <View
-                style={[
-                  styles.complaintStatusDot,
-                  isUnread ? styles.complaintStatusDotUnread : styles.complaintStatusDotRead,
-                ]}
-              />
-              <Text style={[styles.complaintTitle, isUnread && styles.complaintTitleUnread]}>{title}</Text>
-            </View>
-            {formattedDate ? <Text style={styles.complaintDate}>{formattedDate}</Text> : null}
-          </View>
-          <Text style={[styles.complaintMessage, isUnread && styles.complaintMessageUnread]}>
-            {item?.description || 'Nouvelle réclamation.'}
-          </Text>
-          <Text style={styles.complaintDest}>Destinataire : Vous</Text>
-        </View>
-      );
-    },
-    [],
-  );
 
   const fetchMechanicDocId = useCallback(async () => {
     if (mechanicDocId) {
@@ -311,6 +334,18 @@ export default function MechanicHomeScreen() {
     return () => clearInterval(interval);
   }, [fetchUnreadNotifications]);
 
+  useEffect(() => {
+    fetchUnreadMessages();
+    const interval = setInterval(fetchUnreadMessages, 30000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadMessages]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchUnreadMessages();
+    }, [fetchUnreadMessages])
+  );
+
   const handleOpenNotifications = useCallback(async () => {
     try {
       const currentUserId = (profile as any)?.id || (profile as any)?._id;
@@ -375,7 +410,7 @@ export default function MechanicHomeScreen() {
         ),
       );
 
-      setUnreadNotifications((prev) => Math.max(prev - ids.length, 0));
+      await refreshUnreadNotificationsCount();
       setPendingNotifications([]);
       setNotificationsModalVisible(false);
       showInfoToast('Notifications marquées comme lues.', 'Notifications');
@@ -387,7 +422,7 @@ export default function MechanicHomeScreen() {
     } finally {
       setMarkingNotifications(false);
     }
-  }, [API_URL, fetchUnreadNotifications, getAuthHeaders, markingNotifications, openComplaintsDrawer, pendingNotifications, showInfoToast]);
+  }, [API_URL, fetchUnreadNotifications, getAuthHeaders, markingNotifications, openComplaintsDrawer, pendingNotifications, refreshUnreadNotificationsCount, showInfoToast]);
 
   const handleDismissNotifications = useCallback(() => {
     setNotificationsModalVisible(false);
@@ -466,10 +501,12 @@ export default function MechanicHomeScreen() {
         .limit(5)
         .toArray();
 
-      const active = await servicesCollection.findOne({
-        mechanic_id: profile?.id,
-        status: { $in: ['accepted', 'in_progress'] }
-      });
+      const activeCursor = servicesCollection
+        .find({ mechanic_id: profile?.id, status: { $in: ['accepted', 'in_progress'] } })
+        .sort({ updated_at: -1, started_at: -1, created_at: -1 })
+        .limit(1);
+      const activeList = await activeCursor.toArray();
+      const active = activeList[0] ?? null;
 
       const completedCount = await servicesCollection.countDocuments({
         mechanic_id: profile.id,
@@ -477,7 +514,12 @@ export default function MechanicHomeScreen() {
       });
 
       setPendingServices(pending as Service[]);
-      setActiveService(active as Service | null);
+      const normalizedActive = (active as Service | null);
+      if (normalizedActive && !['accepted', 'in_progress'].includes(normalizedActive.status)) {
+        setActiveService(null);
+      } else {
+        setActiveService(normalizedActive);
+      }
       setCompletedServicesCount(completedCount);
     } catch (error) {
       console.error('Error loading services:', error);
@@ -537,7 +579,7 @@ export default function MechanicHomeScreen() {
         if (!servicesEnabled) {
           const usedLast = await fallbackToLastKnown();
           if (!usedLast) {
-            setLocationText('Services de localisation inactifs. Vérifiez que le GPS est allumé.');
+            setLocationText('Vérifiez que le GPS est allumé.');
           }
           return;
         }
@@ -676,7 +718,7 @@ export default function MechanicHomeScreen() {
             if (!prev) return prev;
             const prevId = String((prev as any).id || (prev as any)._id || '');
             if (completedId && prevId && completedId === prevId) {
-              return { ...prev, status: 'completed' } as Service;
+              return null;
             }
             return prev;
           });
@@ -699,7 +741,11 @@ export default function MechanicHomeScreen() {
               breakdown.client?.user?.firstName,
               breakdown.client?.user?.lastName,
             ].filter(Boolean).join(' ') || message,
-            clientPhoto: breakdown.client?.user?.profilePhoto,
+            clientPhoto: resolvePhotoUrl(
+              breakdown.client?.user?.profilePhoto ??
+              breakdown.client?.photo ??
+              breakdown.client?.profilePhoto
+            ),
             clientPhone: breakdown.client?.user?.phoneNumber,
             clientUserId: breakdown.client?.user?._id || breakdown.client?.user?.id,
             description: breakdown.description,
@@ -727,7 +773,11 @@ export default function MechanicHomeScreen() {
               breakdown.client?.user?.firstName,
               breakdown.client?.user?.lastName,
             ].filter(Boolean).join(' ') || 'Nouvelle panne',
-            clientPhoto: breakdown.client?.user?.profilePhoto,
+            clientPhoto: resolvePhotoUrl(
+              breakdown.client?.user?.profilePhoto ||
+              breakdown.client?.photo ||
+              breakdown.client?.profilePhoto
+            ),
             clientPhone: breakdown.client?.user?.phoneNumber,
             clientUserId: breakdown.client?.user?._id || breakdown.client?.user?.id,
             description: breakdown.description,
@@ -828,7 +878,7 @@ export default function MechanicHomeScreen() {
   }, [incomingBreakdown]);
 
   const handleNavigateToActiveService = useCallback(async () => {
-    if (!activeService) return;
+    if (!activeService || !['accepted', 'in_progress'].includes(activeService.status)) return;
 
     const parseNumber = (value: any): number | null => {
       if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -999,9 +1049,7 @@ export default function MechanicHomeScreen() {
     <View style={styles.container}>
       <Sidebar 
         isVisible={isSidebarOpen} 
-        onClose={toggleSidebar} 
-        isDarkMode={isDarkMode}
-        toggleTheme={toggleTheme}
+        onClose={toggleSidebar}
       />
       <View style={styles.header}>
         <TouchableOpacity 
@@ -1012,9 +1060,12 @@ export default function MechanicHomeScreen() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.logo}>TerangaAuto</Text>
-          <Text style={styles.subtitle} onPress={openMap}>
-            {locationText || 'Mécanicien'}
-          </Text>
+          <TouchableOpacity style={styles.locationPill} onPress={openMap} activeOpacity={0.85}>
+            <MapPin size={14} color="#38BDF8" />
+            <Text style={styles.locationPillText} numberOfLines={1}>
+              {locationText || 'Position en cours'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
       {locationGranted === false && (
@@ -1050,49 +1101,89 @@ export default function MechanicHomeScreen() {
 
         <View style={styles.statusCard}>
           <View style={styles.statusHeader}>
-            <View>
-              <Text style={styles.statusTitle}>Statut de disponibilité</Text>
-              <Text style={styles.statusSubtitle}>
-                {isAvailable ? 'Vous êtes disponible' : 'Vous êtes indisponible'}
-              </Text>
+            <View style={styles.statusInfo}>
+              <View style={styles.statusIconWrapper}>
+                <View style={styles.statusIconGlow} />
+                <MapPin color="#0A1F44" size={18} />
+              </View>
+              <View>
+                <Text style={styles.statusTitle}>Statut de disponibilité</Text>
+                <View style={styles.statusBadge}>
+                  <Text style={styles.statusSubtitle}>
+                    {isAvailable ? 'Vous êtes disponible' : 'Vous êtes indisponible'}
+                  </Text>
+                </View>
+              </View>
             </View>
-            <Switch
-              value={isAvailable}
-              onValueChange={toggleAvailability}
-              trackColor={{ false: '#E0E0E0', true: '#34C759' }}
-              thumbColor="#fff"
-            />
+            <View style={styles.statusSwitchWrapper}>
+              <Text style={styles.statusSwitchLabel}>{isAvailable ? 'ON' : 'OFF'}</Text>
+              <Switch
+                value={isAvailable}
+                onValueChange={toggleAvailability}
+                trackColor={{ false: '#D1D5DB', true: '#34C759' }}
+                thumbColor="#fff"
+              />
+            </View>
           </View>
+          <Text style={styles.statusHint}>
+            Activez pour recevoir de nouvelles missions en temps réel.
+          </Text>
         </View>
 
         <View style={styles.statsCard}>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{ratingCount || 0}</Text>
-            <Text style={styles.statLabel}>Avis reçus</Text>
+          <View style={styles.statsHeader}>
+            <View style={styles.sectionHeaderInfo}>
+              <View style={styles.sectionIconWrapper}>
+                <View style={styles.sectionIconGlow} />
+                <BarChart3 color="#0A1F44" size={18} />
+              </View>
+              <View>
+                <Text style={[styles.sectionHeaderTitle, styles.statusBadge]}>Statistiques</Text>
+                <Text style={styles.sectionHeaderSubtitle}>Performance de vos missions</Text>
+              </View>
+            </View>
           </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>⭐ {ratingAverage.toFixed(1)}</Text>
-
-            <Text style={styles.statLabel}>Note moyenne</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{pendingServices.length}</Text>
-            <Text style={styles.statLabel}>En attente</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{completedServicesCount}</Text>
-            <Text style={styles.statLabel}>Missions réalisées</Text>
+          <View style={styles.serviceCard}>
+            <View style={styles.statRow}>
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{ratingCount || 0}</Text>
+                <Text style={styles.statLabel}>Avis reçus</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>⭐ {ratingAverage.toFixed(1)}</Text>
+                <Text style={styles.statLabel}>Note moyenne</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{pendingServices.length}</Text>
+                <Text style={styles.statLabel}>En attente</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{completedServicesCount}</Text>
+                <Text style={styles.statLabel}>Missions réalisées</Text>
+              </View>
+            </View>
           </View>
         </View>
 
-        {activeService && (
-          <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Mission en cours</Text>
-          {activeService ? (
-            <View style={styles.serviceCard}>
+        <View style={styles.missionCard}>
+          <View style={styles.missionHeader}>
+            <View style={styles.sectionHeaderInfo}>
+              <View style={styles.sectionIconWrapper}>
+                <View style={styles.sectionIconGlow} />
+                <MapPin color="#0A1F44" size={18} />
+              </View>
+              <View>
+                <Text style={[styles.sectionHeaderTitle, styles.statusBadge]}>Mission en cours</Text>
+                <Text style={styles.sectionHeaderSubtitle}>Suivez vos interventions actives</Text>
+              </View>
+            </View>
+          </View>
+
+          {activeService && ['accepted', 'in_progress'].includes(activeService.status) ? (
+            <View style={styles.missionContent}>
               <View style={styles.serviceHeader}>
                 <View style={styles.serviceBadge}>
                   <Text style={styles.serviceBadgeText}>
@@ -1116,22 +1207,22 @@ export default function MechanicHomeScreen() {
                   {activeService.location_address || 'Adresse client indisponible'}
                 </Text>
               </View>
-              <View style={styles.serviceMeta}>
-                <Text style={styles.serviceMetaText}>
-                  Client : {activeService.client_name || 'Client'}
+              <View>
+                <Text style={styles.serviceDescription}>
+                  Client : {(activeService as any).client_name || 'Client'}
                 </Text>
-                {!!activeService.client_phone && (
-                  <Text style={styles.serviceMetaText}>
-                    Téléphone : {activeService.client_phone}
+                {!!(activeService as any).client_phone && (
+                  <Text style={styles.serviceDescription}>
+                    Téléphone : {(activeService as any).client_phone}
                   </Text>
                 )}
                 {typeof (activeService as any).distance_km === 'number' && (
-                  <Text style={styles.serviceMetaText}>
+                  <Text style={styles.serviceDescription}>
                     Distance estimée : {(activeService as any).distance_km} km
                   </Text>
                 )}
                 {typeof (activeService as any).estimated_time === 'number' && (
-                  <Text style={styles.serviceMetaText}>
+                  <Text style={styles.serviceDescription}>
                     Durée estimée : {(activeService as any).estimated_time} min
                   </Text>
                 )}
@@ -1153,98 +1244,118 @@ export default function MechanicHomeScreen() {
               </View>
             </View>
           ) : (
-            <View style={[styles.serviceCard, styles.emptyCard]}>
-              <Text style={styles.emptyStateTitle}>Aucune mission en cours</Text>
-              <Text style={styles.emptyStateDescription}>
+            <View style={[styles.missionContent, styles.missionEmpty]}>
+              <View style={styles.sectionIconWrapper}>
+                <View style={styles.sectionIconGlow} />
+                <MapPin color="#0A1F44" size={22} />
+              </View>
+              <Text style={styles.emptyStateText}>Aucune mission en cours</Text>
+              <Text style={styles.serviceDescription}>
                 Acceptez une demande de dépannage pour voir les détails de mission ici.
               </Text>
             </View>
           )}
         </View>
-        )}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Demandes de service</Text>
-          {incomingBreakdown ? (
-            <View style={[styles.serviceCard, styles.incomingCard]}>
-              <View style={styles.incomingHeader}>
-                <Text style={styles.incomingTitle}>Nouvelle demande</Text>
-                <Text style={styles.incomingDistance}>{incomingBreakdown.distanceKm?.toFixed(1)} km</Text>
+        <View style={styles.requestsCard}>
+          <View style={styles.requestsHeader}>
+            <View style={styles.sectionHeaderInfo}>
+              <View style={styles.sectionIconWrapper}>
+                <View style={styles.sectionIconGlow} />
+                <MessageCircle color="#0A1F44" size={18} />
               </View>
-              <View style={styles.incomingClientRow}>
-                <View style={styles.incomingAvatar}>
-                  {incomingBreakdown.clientPhoto ? (
-                    <Image source={{ uri: incomingBreakdown.clientPhoto }} style={styles.incomingAvatarImage} />
-                  ) : (
-                    <Text style={styles.incomingAvatarInitials}>
-                      {incomingBreakdown.clientName?.slice(0, 2).toUpperCase() || 'CL'}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.incomingClientName}>{incomingBreakdown.clientName}</Text>
-                  {incomingBreakdown.clientPhone ? (
-                    <Text style={styles.incomingClientPhone}>{incomingBreakdown.clientPhone}</Text>
-                  ) : null}
-                </View>
-              </View>
-              <Text style={styles.incomingDescription}>{incomingBreakdown.description}</Text>
-              <View style={styles.incomingInfoRow}>
-                <MapPin color="#666" size={16} />
-                <Text style={styles.incomingInfoText}>
-                  {incomingBreakdown.latitude.toFixed(4)}, {incomingBreakdown.longitude.toFixed(4)} • env.{' '}
-                  {incomingBreakdown.estimatedDurationMin} min
-                </Text>
-              </View>
-              <View style={styles.incomingActions}>
-                <TouchableOpacity
-                  style={[styles.declineButton, { flex: 1 }]}
-                  onPress={() => handleDeclineBreakdown(incomingBreakdown)}
-                  disabled={breakdownActionLoading === incomingBreakdown.id}
-                >
-                  <Text style={styles.declineButtonText}>Refuser</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.acceptButton, { flex: 1 }]}
-                  onPress={() => handleAcceptBreakdown(incomingBreakdown)}
-                  disabled={breakdownActionLoading === incomingBreakdown.id}
-                >
-                  <Text style={styles.acceptButtonText}>
-                    {breakdownActionLoading === incomingBreakdown.id ? '...' : 'Accepter'}
-                  </Text>
-                </TouchableOpacity>
+              <View>
+                <Text style={[styles.sectionHeaderTitle, styles.statusBadge]}>Demandes de service</Text>
+                <Text style={styles.sectionHeaderSubtitle}>Consultez et gérez les appels entrants</Text>
               </View>
             </View>
-          ) : null}
-          {nearbyBreakdowns.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>Aucune demande à proximité</Text>
-            </View>
-          ) : (
-            nearbyBreakdowns.map((b) => (
-              <View key={b.id} style={styles.serviceCard}>
-                <View style={styles.serviceHeader}>
-                  <Text style={styles.serviceType}>{b.description || 'Panne'}</Text>
-                  <Text style={styles.serviceDistance}>{b.distanceKm.toFixed(1)} km • {b.estimatedDurationMin} min</Text>
+          </View>
+
+          <View style={styles.serviceCard}>
+            {incomingBreakdown ? (
+              <View style={[styles.requestItem, styles.highlightRequestItem]}>
+                <View style={styles.incomingHeader}>
+                  <Text style={styles.incomingTitle}>Nouvelle demande</Text>
+                  <Text style={styles.incomingDistance}>{incomingBreakdown.distanceKm?.toFixed(1)} km</Text>
                 </View>
-                <Text style={styles.serviceDescription}>Client: {b.clientName}</Text>
-                <View style={styles.serviceLocation}>
+                <View style={styles.incomingClientRow}>
+                  <View style={styles.incomingAvatar}>
+                    {incomingBreakdown.clientPhoto ? (
+                      <Image source={{ uri: incomingBreakdown.clientPhoto }} style={styles.incomingAvatarImage} />
+                    ) : (
+                      <Text style={styles.incomingAvatarInitials}>
+                        {incomingBreakdown.clientName?.slice(0, 2).toUpperCase() || 'CL'}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.incomingClientName}>{incomingBreakdown.clientName}</Text>
+                    {incomingBreakdown.clientPhone ? (
+                      <Text style={styles.incomingClientPhone}>{incomingBreakdown.clientPhone}</Text>
+                    ) : null}
+                  </View>
+                </View>
+                <Text style={styles.incomingDescription}>{incomingBreakdown.description}</Text>
+                <View style={styles.incomingInfoRow}>
                   <MapPin color="#666" size={16} />
-                  <Text style={styles.serviceLocationText}>
-                    {b.latitude.toFixed(4)}, {b.longitude.toFixed(4)}
+                  <Text style={styles.incomingInfoText}>
+                    {incomingBreakdown.latitude.toFixed(4)}, {incomingBreakdown.longitude.toFixed(4)} • env.{' '}
+                    {incomingBreakdown.estimatedDurationMin} min
                   </Text>
                 </View>
-                <View style={styles.serviceActions}>
-                  <TouchableOpacity style={styles.acceptButton}>
-                    <Text style={styles.acceptButtonText}>Accepter</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.declineButton}>
+                <View style={styles.incomingActions}>
+                  <TouchableOpacity
+                    style={[styles.declineButton, { flex: 1 }]}
+                    onPress={() => handleDeclineBreakdown(incomingBreakdown)}
+                    disabled={breakdownActionLoading === incomingBreakdown.id}
+                  >
                     <Text style={styles.declineButtonText}>Refuser</Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.acceptButton, { flex: 1 }]}
+                    onPress={() => handleAcceptBreakdown(incomingBreakdown)}
+                    disabled={breakdownActionLoading === incomingBreakdown.id}
+                  >
+                    <Text style={styles.acceptButtonText}>
+                      {breakdownActionLoading === incomingBreakdown.id ? '...' : 'Accepter'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               </View>
-            ))
-          )}
+            ) : null}
+
+            <View style={styles.requestsList}>
+              {nearbyBreakdowns.length === 0 ? (
+                <View style={styles.requestItem}>
+                  <Text style={styles.emptyStateText}>Aucune demande à proximité</Text>
+                </View>
+              ) : (
+                nearbyBreakdowns.map((b) => (
+                  <View key={b.id} style={styles.requestItem}>
+                    <View style={styles.serviceHeader}>
+                      <Text style={styles.serviceType}>{b.description || 'Panne'}</Text>
+                      <Text style={styles.serviceDistance}>{b.distanceKm.toFixed(1)} km • {b.estimatedDurationMin} min</Text>
+                    </View>
+                    <Text style={styles.serviceDescription}>Client: {b.clientName}</Text>
+                    <View style={styles.serviceLocation}>
+                      <MapPin color="#666" size={16} />
+                      <Text style={styles.serviceLocationText}>
+                        {b.latitude.toFixed(4)}, {b.longitude.toFixed(4)}
+                      </Text>
+                    </View>
+                    <View style={styles.serviceActions}>
+                      <TouchableOpacity style={styles.acceptButton}>
+                        <Text style={styles.acceptButtonText}>Accepter</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.declineButton}>
+                        <Text style={styles.declineButtonText}>Refuser</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+          </View>
         </View>
       </ScrollView>
 
@@ -1254,86 +1365,97 @@ export default function MechanicHomeScreen() {
         animationType="fade"
         onRequestClose={handleDismissNotifications}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.notificationsModal}>
-            <Text style={styles.modalTitle}>Notifications</Text>
-            <Text style={styles.modalSubtitle}>
-              {pendingNotifications.length} notification{pendingNotifications.length > 1 ? 's' : ''} non lue{pendingNotifications.length > 1 ? 's' : ''}
-            </Text>
-            <FlatList
-              data={pendingNotifications}
-              keyExtractor={(item) => String(item?._id || item?.id || Math.random())}
-              contentContainerStyle={{ gap: 12, paddingVertical: 4 }}
-              renderItem={({ item }) => (
-                <View style={styles.notificationCard}>
-                  <Text style={styles.notificationTitle}>{item?.title || 'Notification'}</Text>
-                  <Text style={styles.notificationContent}>{item?.content || ''}</Text>
-                  {item?.sentAt ? (
-                    <Text style={styles.notificationTime}>
-                      {new Date(item.sentAt).toLocaleString()}
-                    </Text>
-                  ) : null}
+        <TouchableWithoutFeedback onPress={handleDismissNotifications}>
+          <View style={styles.popoverOverlay}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <GestureHandlerRootView style={styles.popoverGestureRoot}>
+                <View style={styles.notificationsPopover}>
+                  <View style={styles.popoverHeader}>
+                    <Text style={styles.popoverTitle}>Notifications</Text>
+                    <View style={styles.popoverActions}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setNotificationsModalVisible(false);
+                          openComplaintsDrawer();
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.popoverAction}>Voir tout</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={handleConfirmNotifications} disabled={markingNotifications}>
+                        <Text
+                          style={[styles.popoverAction, markingNotifications && styles.popoverActionDisabled]}
+                        >
+                          {markingNotifications ? '...' : 'Tout lire'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  <Text style={styles.popoverSubtitle}>
+                    {pendingNotifications.length} notification{pendingNotifications.length > 1 ? 's' : ''} en attente
+                  </Text>
+                  {pendingNotifications.length === 0 ? (
+                    <View style={styles.popoverEmpty}>
+                      <Text style={styles.popoverEmptyText}>Aucune nouvelle notification.</Text>
+                    </View>
+                  ) : (
+                    <FlatList
+                      data={pendingNotifications}
+                      keyExtractor={(item) => String(item?._id || item?.id || Math.random())}
+                      renderItem={({ item }) => {
+                        const id = String(item?._id || item?.id || '');
+                        return (
+                          <Swipeable
+                            renderRightActions={() => (
+                              <View style={styles.notificationDeleteContainer}>
+                                <RectButton
+                                  style={styles.notificationDeleteButton}
+                                  onPress={() => handleDeleteNotification(id)}
+                                >
+                                  <Trash2 color="#fff" size={20} />
+                                  <Text style={styles.notificationDeleteText}>Supprimer</Text>
+                                </RectButton>
+                              </View>
+                            )}
+                            onSwipeableOpen={(direction) => {
+                              if (direction === 'right') {
+                                handleDeleteNotification(id);
+                              }
+                            }}
+                            overshootRight={false}
+                          >
+                            <View
+                              style={[
+                                styles.notificationCard,
+                                removingNotificationId === id && styles.notificationCardRemoving,
+                              ]}
+                            >
+                              <Text style={styles.notificationTitle}>{item?.title || 'Notification'}</Text>
+                              <Text style={styles.notificationContent}>{item?.content || ''}</Text>
+                              {item?.sentAt ? (
+                                <Text style={styles.notificationTime}>
+                                  {new Date(item.sentAt).toLocaleString()}
+                                </Text>
+                              ) : null}
+                            </View>
+                          </Swipeable>
+                        );
+                      }}
+                      style={styles.popoverList}
+                      contentContainerStyle={{ gap: 10, paddingVertical: 4 }}
+                      showsVerticalScrollIndicator={false}
+                    />
+                  )}
+                  <TouchableOpacity style={styles.popoverClose} onPress={handleDismissNotifications}>
+                    <Text style={styles.popoverCloseText}>Fermer</Text>
+                  </TouchableOpacity>
                 </View>
-              )}
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonSecondary]}
-                onPress={handleDismissNotifications}
-                disabled={markingNotifications}
-              >
-                <Text style={[styles.modalButtonText, styles.modalButtonSecondaryText]}>Fermer</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, markingNotifications && styles.disabledButton]}
-                onPress={handleConfirmNotifications}
-                disabled={markingNotifications}
-              >
-                <Text style={styles.modalButtonText}>
-                  {markingNotifications ? '...' : 'Marquer comme lues'}
-                </Text>
-              </TouchableOpacity>
-            </View>
+              </GestureHandlerRootView>
+            </TouchableWithoutFeedback>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
-      <Modal
-        visible={complaintsDrawerVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closeComplaintsDrawer}
-      >
-        <View style={styles.drawerOverlay}>
-          <View style={styles.drawerContainer}>
-            <View style={styles.drawerHeader}>
-              <Text style={styles.drawerTitle}>Signalements clients</Text>
-              <TouchableOpacity onPress={closeComplaintsDrawer}>
-                <Text style={styles.drawerClose}>Fermer</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.drawerSubtitle}>
-              Retrouvez ici les signalements reçus. Les nouveaux restent en gras jusqu'à lecture.
-            </Text>
-            {loadingComplaints ? (
-              <View style={styles.drawerLoading}>
-                <ActivityIndicator size="large" color="#0A1F44" />
-              </View>
-            ) : complaints.length === 0 ? (
-              <View style={styles.drawerEmptyState}>
-                <Text style={styles.drawerEmptyText}>Aucun signalement pour le moment.</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={complaints}
-                keyExtractor={(item) => String(item?._id || item?.id || Math.random())}
-                renderItem={renderComplaintItem}
-                contentContainerStyle={styles.drawerList}
-              />
-            )}
-          </View>
-        </View>
-      </Modal>
 
       {/* Bouton flottant pour la messagerie */}
       <TouchableOpacity
@@ -1341,155 +1463,708 @@ export default function MechanicHomeScreen() {
         onPress={() => router.push('/(mechanic)/(tabs)/messages' as any)}
         activeOpacity={0.8}
       >
-        <MessageCircle size={28} color="#FFFFFF" />
+        <MessageCircle color="#FFFFFF" size={24} />
+        {unreadMessages > 0 ? (
+          <View style={styles.floatingBadge}>
+            <Text style={styles.floatingBadgeText}>{unreadMessages > 9 ? '9+' : unreadMessages}</Text>
+          </View>
+        ) : null}
       </TouchableOpacity>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
+const createStyles = (colors: ClientThemeColors) => {
+  const accent = colors.accent;
+  const accentContrast = colors.accentContrast;
+  const textPrimary = colors.textPrimary;
+  const textSecondary = colors.textSecondary;
+  const background = colors.background;
+  const surface = colors.surface;
+  const surfaceAlt = colors.surfaceAlt;
+  const card = colors.card;
+  const cardBorder = colors.cardBorder;
+  const border = colors.border;
+  const accentSoft = 'rgba(56,189,248,0.18)';
+  const successSoft = 'rgba(34,197,94,0.16)';
+  const infoSoft = 'rgba(59,130,246,0.14)';
+
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: background,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingTop: 60,
+      paddingBottom: 16,
+      paddingHorizontal: 16,
+      backgroundColor: surfaceAlt,
+      borderBottomWidth: 1,
+      borderBottomColor: border,
+    },
+    headerButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 8,
+      marginLeft: 12,
+      position: 'relative',
+      backgroundColor: 'transparent',
+    },
+    notificationBadge: {
+      position: 'absolute',
+      top: -4,
+      right: -4,
+      minWidth: 18,
+      height: 18,
+      borderRadius: 9,
+      backgroundColor: '#EF4444',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 4,
+    },
+    headerCenter: {
+      alignItems: 'center',
+    },
+    logo: {
+      color: textPrimary,
+      fontSize: 20,
+      fontWeight: '700',
+    },
+    locationPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 4,
+      borderRadius: 999,
+      backgroundColor: accentSoft,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderWidth: 1,
+      borderColor: accentSoft,
+    },
+    locationPillText: {
+      color: textPrimary,
+      fontSize: 12,
+      fontWeight: '500',
+      maxWidth: 170,
+    },
+    headerRight: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    content: {
+      flex: 1,
+    },
+    locationPrompt: {
+      backgroundColor: surfaceAlt,
+      borderColor: border,
+      borderWidth: 1,
+      marginHorizontal: 16,
+      marginTop: 8,
+      padding: 12,
+      borderRadius: 10,
+    },
+    locationPromptText: {
+      color: textSecondary,
+      fontSize: 12,
+      marginBottom: 8,
+    },
+    locationPromptBtn: {
+      alignSelf: 'flex-start',
+      backgroundColor: accent,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+    },
+    locationPromptBtnText: {
+      color: accentContrast,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    welcomeCard: {
+      backgroundColor: surface,
+      marginHorizontal: 16,
+      marginTop: 16,
+      marginBottom: 8,
+      padding: 20,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: cardBorder,
+    },
+    welcomeText: {
+      color: textPrimary,
+      fontWeight: '700',
+      fontSize: 20,
+      marginBottom: 4,
+    },
+    welcomeSubtext: {
+      color: textSecondary,
+      fontSize: 14,
+    },
+    statusCard: {
+      margin: 16,
+      padding: 18,
+      borderRadius: 18,
+      backgroundColor: card,
+      borderWidth: 1,
+      borderColor: cardBorder,
+      gap: 16,
+    },
+    statusHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 16,
+    },
+    statusInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    statusIconWrapper: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: successSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    statusIconGlow: {
+      position: 'absolute',
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: 'rgba(34,197,94,0.25)',
+      opacity: 0.6,
+    },
+    statusTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: textPrimary,
+      marginBottom: 4,
+    },
+    statusBadge: {
+      alignSelf: 'flex-start',
+      backgroundColor: surfaceAlt,
+      borderRadius: 16,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderWidth: 1,
+      borderColor: border,
+    },
+    statusSubtitle: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: textPrimary,
+    },
+    statusSwitchWrapper: {
+      alignItems: 'center',
+      gap: 6,
+    },
+    statusSwitchLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: textSecondary,
+      letterSpacing: 1,
+    },
+    statusHint: {
+      fontSize: 12,
+      color: textSecondary,
+    },
+    sectionHeaderRow: {
+      marginHorizontal: 16,
+      marginTop: 8,
+      marginBottom: 10,
+    },
+    sectionHeaderInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    sectionIconWrapper: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: successSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    sectionIconGlow: {
+      position: 'absolute',
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: 'rgba(34,197,94,0.25)',
+      opacity: 0.6,
+    },
+    sectionHeaderTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: textPrimary,
+    },
+    sectionHeaderSubtitle: {
+      fontSize: 12,
+      color: textSecondary,
+    },
+    statsCard: {
+      marginHorizontal: 16,
+      marginBottom: 16,
+      padding: 18,
+      borderRadius: 18,
+      backgroundColor: card,
+      borderWidth: 1,
+      borderColor: cardBorder,
+      gap: 16,
+    },
+    statsHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    statRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    statItem: {
+      alignItems: 'center',
+      flex: 1,
+    },
+    statValue: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      marginBottom: 4,
+    },
+    statLabel: {
+      fontSize: 12,
+      color: '#666',
+    },
+    statDivider: {
+      width: 1,
+      height: '60%',
+      backgroundColor: '#E0E0E0',
+    },
+    missionCard: {
+      marginHorizontal: 16,
+      marginBottom: 24,
+      padding: 18,
+      borderRadius: 18,
+      backgroundColor: '#E6F0FF',
+      borderWidth: 1,
+      borderColor: '#B3D4FF',
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowOffset: { width: 0, height: 4 },
+      shadowRadius: 8,
+      elevation: 3,
+      gap: 16,
+    },
+    missionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    missionContent: {
+      backgroundColor: '#FFFFFF',
+      borderRadius: 14,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: '#B3D4FF',
+      gap: 12,
+    },
+    missionEmpty: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+    },
+    missionTitleBadge: {
+      backgroundColor: '#34C759',
+      color: '#FFFFFF',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 16,
+      overflow: 'hidden',
+      alignSelf: 'flex-start',
+    },
+    missionIconWrapper: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: '#DCFCE7',
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    missionIconGlow: {
+      position: 'absolute',
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: '#BBF7D0',
+      opacity: 0.6,
+    },
+    requestsCard: {
+      marginHorizontal: 16,
+      marginBottom: 24,
+      padding: 18,
+      borderRadius: 18,
+      backgroundColor: '#E6F0FF',
+      borderWidth: 1,
+      borderColor: '#B3D4FF',
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowOffset: { width: 0, height: 4 },
+      shadowRadius: 8,
+      elevation: 3,
+      gap: 16,
+    },
+    requestsHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    archiveButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(10,31,68,0.08)',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 16,
+    },
+    archiveButtonText: {
+      color: '#0A1F44',
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    archiveButtonTextDisabled: {
+      color: '#94A3B8',
+    },
+    requestsList: {
+      gap: 12,
+    },
+    requestItem: {
+      backgroundColor: '#FFFFFF',
+      borderRadius: 14,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: '#D4E7FF',
+      gap: 10,
+    },
+    highlightRequestItem: {
+      borderColor: '#2563EB',
+      backgroundColor: '#EBF2FF',
+    },
+    compactCardContainer: {
+      backgroundColor: '#FFFFFF',
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: '#D4E7FF',
+      padding: 16,
+      gap: 14,
+    },
+    compactRequestItem: {
+      backgroundColor: '#F8FBFF',
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: '#E1ECFF',
+      padding: 14,
+      gap: 10,
+    },
+    compactItemHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    compactTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    compactTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#0A1F44',
+    },
+    compactBadge: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: '#1D4ED8',
+      backgroundColor: 'rgba(29,78,216,0.12)',
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 12,
+    },
+    compactClientRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    incomingAvatarSmall: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: '#E0F2FE',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    compactClientName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#0F172A',
+    },
+    compactClientPhone: {
+      fontSize: 14,
+      color: '#0F172A',
+    },
+    incomingHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      padding: 16,
+      backgroundColor: surfaceAlt,
+      borderBottomWidth: 1,
+      borderBottomColor: border,
+    },
+    incomingTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: textPrimary,
+    },
+    incomingDistance: {
+      fontSize: 14,
+      color: textSecondary,
+    },
+    incomingClientRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 16,
+    },
+    incomingAvatar: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: '#E0F2FE',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    incomingAvatarImage: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+    },
+    incomingAvatarInitials: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: '#0A1F44',
+    },
+    incomingClientName: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: textPrimary,
+    },
+    incomingClientPhone: {
+      fontSize: 14,
+      color: textSecondary,
+    },
+    incomingDescription: {
+      fontSize: 14,
+      color: textSecondary,
+      padding: 16,
+    },
+    incomingInfoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 16,
+    },
+    incomingInfoText: {
+      fontSize: 14,
+      color: textSecondary,
+    },
+    incomingActions: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 12,
+      padding: 16,
+    },
+    declineButton: {
+      backgroundColor: '#F8F8F8',
+      borderRadius: 8,
+      padding: 12,
+      flex: 1,
+    },
+    declineButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#666',
+    },
+    acceptButton: {
+      backgroundColor: accent,
+      borderRadius: 8,
+      padding: 12,
+      flex: 1,
+    },
+    acceptButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: accentContrast,
+    },
+    floatingButton: {
+      position: 'absolute',
+      bottom: 16,
+      right: 16,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.1,
+      shadowOffset: { width: 0, height: 4 },
+      shadowRadius: 8,
+      elevation: 3,
+    },
+    floatingBadge: {
+      position: 'absolute',
+      top: -4,
+      right: -4,
+      minWidth: 18,
+      height: 18,
+      borderRadius: 9,
+      backgroundColor: '#EF4444',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 4,
+    },
+    floatingBadgeText: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    popoverOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    popoverGestureRoot: {
+      backgroundColor: 'transparent',
+    },
+    notificationsPopover: {
+      backgroundColor: surface,
+      borderRadius: 18,
+      padding: 20,
+      maxWidth: 300,
+    },
+    popoverHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 16,
+    },
+    popoverTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: textPrimary,
+    },
+    popoverActions: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    popoverAction: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: textPrimary,
+    },
+    popoverActionDisabled: {
+      color: '#94A3B8',
+    },
+    popoverSubtitle: {
+      fontSize: 14,
+      color: textSecondary,
+      marginBottom: 16,
+    },
+    popoverEmpty: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+    },
+    popoverEmptyText: {
+      fontSize: 14,
+      color: textSecondary,
+    },
+    popoverList: {
+      gap: 10,
+    },
+    notificationCard: {
+      backgroundColor: '#FFFFFF',
+      borderRadius: 14,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: '#D4E7FF',
+      gap: 10,
+    },
+    notificationCardRemoving: {
+      backgroundColor: '#F8F8F8',
+    },
+    notificationTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: textPrimary,
+    },
+    notificationContent: {
+      fontSize: 14,
+      color: textSecondary,
+    },
+    notificationTime: {
+      fontSize: 12,
+      color: textSecondary,
+    },
+    notificationDeleteContainer: {
+      backgroundColor: '#EF4444',
+      borderRadius: 14,
+      padding: 16,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    notificationDeleteButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      padding: 12,
+    },
+    notificationDeleteText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    popoverClose: {
+      position: 'absolute',
+      top: 16,
+      right: 16,
+    },
+    statItem: {
+    alignItems: 'center',
     flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 60,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    backgroundColor: '#007AFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#0066DD',
-  },
-  headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 8,
-    marginLeft: 12,
-    position: 'relative',
-  },
-  notificationBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#EF4444',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  notificationBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  headerCenter: {
-    alignItems: 'center',
-  },
-  logo: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    marginTop: 2,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  content: {
-    flex: 1,
-  },
-  locationPrompt: {
-    backgroundColor: '#FFF7ED',
-    borderColor: '#FED7AA',
-    borderWidth: 1,
-    marginHorizontal: 16,
-    marginTop: 8,
-    padding: 12,
-    borderRadius: 10,
-  },
-  locationPromptText: {
-    color: '#7C2D12',
-    fontSize: 12,
-    marginBottom: 8,
-  },
-  locationPromptBtn: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#0A1F44',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  locationPromptBtnText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  welcomeCard: {
-    backgroundColor: '#007AFF',
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 8,
-    padding: 20,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  welcomeText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 20,
-    marginBottom: 4,
-  },
-  welcomeSubtext: {
-    color: '#E5F1FF',
-    fontSize: 14,
-  },
-  statusCard: {
-    backgroundColor: '#fff',
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
-  },
-  statusHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  statusTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  statusSubtitle: {
-    fontSize: 14,
-    color: '#666',
-  },
-  statsCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  statItem: {
-    alignItems: 'center',
   },
   statValue: {
     fontSize: 24,
@@ -1502,7 +2177,270 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
+    height: '60%',
     backgroundColor: '#E0E0E0',
+  },
+  missionCard: {
+    marginHorizontal: 16,
+    marginBottom: 24,
+    padding: 18,
+    borderRadius: 18,
+    backgroundColor: '#E6F0FF',
+    borderWidth: 1,
+    borderColor: '#B3D4FF',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 8,
+    elevation: 3,
+    gap: 16,
+  },
+  missionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  missionContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#B3D4FF',
+    gap: 12,
+  },
+  missionEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  missionTitleBadge: {
+    backgroundColor: '#34C759',
+    color: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    overflow: 'hidden',
+    alignSelf: 'flex-start',
+  },
+  missionIconWrapper: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  missionIconGlow: {
+    position: 'absolute',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#BBF7D0',
+    opacity: 0.6,
+  },
+  requestsCard: {
+    marginHorizontal: 16,
+    marginBottom: 24,
+    padding: 18,
+    borderRadius: 18,
+    backgroundColor: '#E6F0FF',
+    borderWidth: 1,
+    borderColor: '#B3D4FF',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 8,
+    elevation: 3,
+    gap: 16,
+  },
+  requestsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  archiveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(10,31,68,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+  },
+  archiveButtonText: {
+    color: '#0A1F44',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  archiveButtonTextDisabled: {
+    color: '#94A3B8',
+  },
+  requestsList: {
+    gap: 12,
+  },
+  requestItem: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#D4E7FF',
+    gap: 10,
+  },
+  highlightRequestItem: {
+    borderColor: '#2563EB',
+    backgroundColor: '#EBF2FF',
+  },
+  compactCardContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#D4E7FF',
+    padding: 16,
+    gap: 14,
+  },
+  compactRequestItem: {
+    backgroundColor: '#F8FBFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E1ECFF',
+    padding: 14,
+    gap: 10,
+  },
+  compactItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  compactTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  compactTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0A1F44',
+  },
+  compactBadge: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1D4ED8',
+    backgroundColor: 'rgba(29,78,216,0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  compactClientRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  incomingAvatarSmall: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  compactClientName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  compactClientPhone: {
+    fontSize: 12,
+    color: '#475569',
+  },
+  compactDescription: {
+    fontSize: 13,
+    color: '#334155',
+  },
+  compactMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  compactMetaText: {
+    fontSize: 12,
+    color: '#475569',
+  },
+  compactActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  compactButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  compactButtonPrimary: {
+    backgroundColor: '#0A84FF',
+  },
+  compactButtonSecondary: {
+    backgroundColor: '#EFF4FF',
+  },
+  compactButtonPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  compactButtonSecondaryText: {
+    color: '#1D4ED8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  compactList: {
+    gap: 12,
+  },
+  compactEmpty: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+  },
+  archivedContainer: {
+    borderTopWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingTop: 12,
+    gap: 10,
+  },
+  archivedTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  archivedItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  archivedItemTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  archivedItemMeta: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  archivedRestoreButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1D4ED8',
+  },
+  archivedRestoreText: {
+    color: '#1D4ED8',
+    fontSize: 12,
+    fontWeight: '600',
   },
   section: {
     marginBottom: 24,
@@ -1639,6 +2577,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
+  navigateButtonDisabled: {
+    opacity: 0.6,
+  },
   acceptButton: {
     flex: 1,
     backgroundColor: '#34C759',
@@ -1713,6 +2654,9 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: '#F8FAFC',
   },
+  notificationCardRemoving: {
+    opacity: 0.5,
+  },
   notificationTitle: {
     fontSize: 15,
     fontWeight: '600',
@@ -1727,6 +2671,27 @@ const styles = StyleSheet.create({
   notificationTime: {
     fontSize: 12,
     color: '#64748B',
+  },
+  notificationDeleteContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 100,
+    marginVertical: 2,
+  },
+  notificationDeleteButton: {
+    width: 100,
+    backgroundColor: '#EF4444',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
+    marginVertical: 2,
+    marginRight: 2,
+  },
+  notificationDeleteText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
   },
   modalActions: {
     flexDirection: 'row',
@@ -1867,15 +2832,108 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 95,
     right: 16,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    justifyContent: 'center',
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  floatingBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  floatingBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  popoverOverlay: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 85,
+    paddingRight: 12,
+  },
+  notificationsPopover: {
+    width: 280,
+    maxHeight: 320,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  popoverGestureRoot: {
+    borderRadius: 16,
+  },
+  popoverHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  popoverTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  popoverActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  popoverAction: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2563EB',
+  },
+  popoverActionDisabled: {
+    color: '#94A3B8',
+  },
+  popoverSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 10,
+  },
+  popoverEmpty: {
+    paddingVertical: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  popoverEmptyText: {
+    fontSize: 13,
+    color: '#94A3B8',
+  },
+  popoverList: {
+    maxHeight: 220,
+  },
+  popoverClose: {
+    alignSelf: 'flex-end',
+    marginTop: 12,
+  },
+  popoverCloseText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2563EB',
   },
 });
+};

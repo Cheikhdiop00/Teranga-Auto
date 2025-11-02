@@ -44,17 +44,38 @@ export const initSocket = (app: any) => {
     // Gestion des messages
     socket.on('send_message', async (data: any) => {
       try {
-        const { conversationId, content, recipientId, messageType = 'text', fileUrl, fileName } = data;
+        const {
+          conversationId,
+          content,
+          recipientId,
+          messageType = 'text',
+          fileUrl,
+          fileName,
+          audioDurationMs,
+        } = data;
+
+        if (!conversationId || !recipientId) {
+          socket.emit('error', { message: 'Conversation et destinataire requis' });
+          return;
+        }
+
+        const trimmedContent = typeof content === 'string' ? content.trim() : '';
+        const requiresFile = messageType === 'image' || messageType === 'file' || messageType === 'audio';
+        if (requiresFile && !fileUrl) {
+          socket.emit('error', { message: 'fileUrl est requis pour ce type de message' });
+          return;
+        }
 
         // Créer le message
         const message = new Message({
           conversation: conversationId,
           sender: socket.user.id,
-          content,
+          content: trimmedContent || (messageType === 'audio' ? '[audio]' : ''),
           read: false,
           messageType,
           fileUrl,
-          fileName
+          fileName,
+          audioDurationMs
         });
 
         await message.save();

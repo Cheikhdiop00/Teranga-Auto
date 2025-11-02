@@ -25,6 +25,7 @@ interface AuthContextType {
     userType: UserType;
     specialties?: string[];
     idCardNumber?: string;
+    profilePhoto?: string;
   }) => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<void>;
@@ -126,15 +127,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         first_name: user.firstName || '',
         last_name: user.lastName || '',
         phone: user.phoneNumber || '',
-        address: '',
-        photo_url: user.profilePhoto,
-        id_card_number: undefined,
-        specialties: undefined,
-        is_available: true,
-        rating_average: 0,
-        rating_count: 0,
-        latitude: 0,
-        longitude: 0,
+        address: user.address || '',
+        photo_url: user.profilePhoto || undefined,
+        id_card_number: user.nationalId,
+        specialties: Array.isArray(user.specialties)
+          ? user.specialties
+          : typeof user.specialty === 'string' && user.specialty
+            ? [user.specialty]
+            : undefined,
+        mechanic_record_id:
+          typeof user.mechanic_record_id === 'string'
+            ? user.mechanic_record_id
+            : typeof user.mechanicId === 'string'
+              ? user.mechanicId
+              : undefined,
+        is_available: user.available !== false,
+        rating_average: typeof user.reputation === 'number' ? user.reputation : user.rating_average ?? 0,
+        rating_count: typeof user.rating_count === 'number' ? user.rating_count : user.interventionsCount ?? 0,
+        missions_completed: typeof user.missions_completed === 'number' ? user.missions_completed : 0,
+        latitude: typeof user.latitude === 'number' ? user.latitude : 0,
+        longitude: typeof user.longitude === 'number' ? user.longitude : 0,
         is_blocked: user.status === 'inactive',
         created_at: user.createdAt || new Date().toISOString(),
         updated_at: user.updatedAt || new Date().toISOString(),
@@ -183,16 +195,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       first_name: data.user.firstName || '',
       last_name: data.user.lastName || '',
       phone: data.user.phoneNumber || '',
-      address: '',
-      photo_url: data.user.profilePhoto,
-      id_card_number: undefined,
-      specialties: undefined,
-      is_available: true,
-      rating_average: 0,
-      rating_count: 0,
+      address: data.user.address || '',
+      photo_url: data.user.profilePhoto || undefined,
+      id_card_number: data.user.nationalId,
+      specialties: Array.isArray(data.user.specialties)
+        ? data.user.specialties
+        : typeof data.user.specialty === 'string' && data.user.specialty
+          ? [data.user.specialty]
+          : undefined,
+      mechanic_record_id:
+        typeof data.user.mechanic_record_id === 'string'
+          ? data.user.mechanic_record_id
+          : typeof data.user.mechanicId === 'string'
+            ? data.user.mechanicId
+            : undefined,
+      is_available: data.user.available !== false,
+      rating_average: typeof data.user.reputation === 'number' ? data.user.reputation : data.user.rating_average ?? 0,
+      rating_count: typeof data.user.rating_count === 'number' ? data.user.rating_count : data.user.interventionsCount ?? 0,
       missions_completed: 0,
-      latitude: 0,
-      longitude: 0,
+      latitude: typeof data.user.latitude === 'number' ? data.user.latitude : 0,
+      longitude: typeof data.user.longitude === 'number' ? data.user.longitude : 0,
       is_blocked: false,
       created_at: data.user.createdAt || new Date().toISOString(),
       updated_at: data.user.updatedAt || new Date().toISOString(),
@@ -223,6 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       userType: UserType;
       specialties?: string[];
       idCardNumber?: string;
+      profilePhoto?: string;
     }
   ) => {
     if (useMockAuth) {
@@ -250,6 +273,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       address: userData.address,
       nationalId: userData.idCardNumber,
       role: userData.userType === 'mechanic' ? 'MECANICIEN' : 'CLIENT',
+      specialties: userData.specialties,
+      profilePhoto: userData.profilePhoto,
     } as const;
 
     const response = await fetch(`${API_BASE_URL}/auth/register`, {
@@ -272,6 +297,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await AsyncStorage.setItem('userId', createdUserId);
     }
     await AsyncStorage.setItem('userEmail', email);
+
+    if (createdUserId) {
+      setSession({ userId: createdUserId });
+      setUser({ id: createdUserId, email });
+      const userPayload = data.user ?? {};
+      const mappedProfile: Profile = {
+        id: createdUserId,
+        user_type: userPayload.role === 'ADMIN' ? 'admin' : userPayload.role === 'CLIENT' ? 'client' : 'mechanic',
+        first_name: userPayload.firstName || userData.firstName || '',
+        last_name: userPayload.lastName || userData.lastName || '',
+        phone: userPayload.phoneNumber || userData.phone || '',
+        address: userPayload.address || userData.address || '',
+        photo_url: userPayload.profilePhoto || userData.profilePhoto || undefined,
+        id_card_number: userPayload.nationalId || userData.idCardNumber,
+        specialties:
+          Array.isArray(userPayload.specialties) && userPayload.specialties.length > 0
+            ? userPayload.specialties
+            : userData.specialties,
+        is_available: true,
+        rating_average: userPayload.rating_average ?? 0,
+        rating_count: userPayload.rating_count ?? 0,
+        missions_completed:
+          typeof userPayload.missions_completed === 'number' ? userPayload.missions_completed : 0,
+        mechanic_record_id:
+          typeof userPayload.mechanic_record_id === 'string'
+            ? userPayload.mechanic_record_id
+            : userPayload.mechanicId || userPayload.mechanic_id,
+        latitude: userPayload.latitude ?? 0,
+        longitude: userPayload.longitude ?? 0,
+        is_blocked: userPayload.status === 'inactive',
+        created_at: userPayload.createdAt || new Date().toISOString(),
+        updated_at: userPayload.updatedAt || new Date().toISOString(),
+      };
+      setProfile(mappedProfile);
+    }
+
+    setLoading(false);
   };
 
   const signOut = async () => {

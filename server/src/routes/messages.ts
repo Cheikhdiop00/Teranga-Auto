@@ -66,18 +66,22 @@ router.get('/conversations', messageController.getConversations);
  *                 description: Message initial optionnel pour démarrer la conversation
  *               messageType:
  *                 type: string
- *                 enum: [text, image, file]
+ *                 enum: [text, image, file, audio]
  *                 default: text
  *                 example: "text"
  *                 description: Type du message optionnel, valeur par defaut text
  *               fileUrl:
  *                 type: string
  *                 example: "https://example.com/image.jpg"
- *                 description: URL du fichier si messageType est 'image' ou 'file'
+ *                 description: URL du fichier si messageType est 'image', 'file' ou 'audio'
  *               fileName:
  *                 type: string
- *                 example: "photo.jpg"
- *                 description: Nom du fichier si messageType est 'image' ou 'file'
+ *                 example: "enregistrement.m4a"
+ *                 description: Nom du fichier si messageType est 'image', 'file' ou 'audio'
+ *               audioDurationMs:
+ *                 type: number
+ *                 example: 4200
+ *                 description: Durée de l'audio en millisecondes si messageType est 'audio'
  *     responses:
  *       201:
  *         description: Conversation créée avec succès

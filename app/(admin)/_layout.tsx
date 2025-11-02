@@ -1,9 +1,16 @@
 import { Stack } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 
-export default function AdminLayout() {
+import {
+  ClientThemeProvider,
+  useClientTheme,
+} from '@/contexts/ClientThemeContext';
+
+function AdminStack() {
+  const { colors } = useClientTheme();
+
   return (
-    <View style={styles.container}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
       </Stack>
@@ -11,9 +18,10 @@ export default function AdminLayout() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF', // Fond blanc pour toute la zone admin
-  },
-});
+export default function AdminLayout() {
+  return (
+    <ClientThemeProvider>
+      <AdminStack />
+    </ClientThemeProvider>
+  );
+}

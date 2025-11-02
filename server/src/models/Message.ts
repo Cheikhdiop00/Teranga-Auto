@@ -6,9 +6,10 @@ export interface IMessage extends Document {
   content: string;
   read: boolean;
   readAt?: Date;
-  messageType: 'text' | 'image' | 'file';
+  messageType: 'text' | 'image' | 'file' | 'audio';
   fileUrl?: string;
   fileName?: string;
+  audioDurationMs?: number;
 }
 
 const messageSchema = new Schema<IMessage>({
@@ -17,9 +18,10 @@ const messageSchema = new Schema<IMessage>({
   content: { type: String, required: true },
   read: { type: Boolean, default: false },
   readAt: { type: Date },
-  messageType: { type: String, enum: ['text', 'image', 'file'], default: 'text' },
+  messageType: { type: String, enum: ['text', 'image', 'file', 'audio'], default: 'text' },
   fileUrl: { type: String },
-  fileName: { type: String }
+  fileName: { type: String },
+  audioDurationMs: { type: Number }
 }, { timestamps: true });
 
 export default model<IMessage>('Message', messageSchema);

@@ -17,6 +17,7 @@ export interface Profile {
   rating_average: number;
   rating_count: number;
   missions_completed?: number;
+  mechanic_record_id?: string;
   latitude?: number;
   longitude?: number;
   is_blocked: boolean;

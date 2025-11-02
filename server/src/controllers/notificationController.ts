@@ -85,6 +85,38 @@ export const markAllAsRead = async (req: Request, res: Response) => {
   }
 };
 
+export const deleteNotification = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = (req as any).user?.id;
+
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'Identifiant de notification invalide' });
+    }
+
+    const notification = await Notification.findOneAndDelete({ _id: id, user: userId });
+
+    if (!notification) {
+      return res.status(404).json({ success: false, message: 'Notification non trouvée' });
+    }
+
+    const unreadCount = await Notification.countDocuments({ user: userId, read: false });
+
+    res.json({
+      success: true,
+      message: 'Notification supprimée',
+      unreadCount,
+    });
+
+    try {
+      getIO().to(`user_${userId}`).emit('notifications_unread', { count: unreadCount });
+    } catch {}
+  } catch (error) {
+    console.error('Error deleting notification:', error);
+    res.status(500).json({ success: false, message: 'Erreur lors de la suppression de la notification' });
+  }
+};
+
 export const getUnreadCount = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.id;

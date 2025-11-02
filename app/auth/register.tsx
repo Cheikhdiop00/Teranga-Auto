@@ -9,11 +9,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserType, MECHANIC_SPECIALTIES } from '@/types/database';
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -41,6 +44,9 @@ export default function RegisterScreen() {
   const [idCardError, setIdCardError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   useEffect(() => {
     if (userType !== 'mechanic') {
@@ -92,6 +98,7 @@ export default function RegisterScreen() {
           userType === 'mechanic' && mechanicSpecialty
             ? [mechanicSpecialty]
             : undefined,
+        profilePhoto: photo ?? undefined,
       });
       Alert.alert('Succès', 'Compte créé avec succès !', [
         { text: 'OK', onPress: () => router.replace('/auth/login') },
@@ -339,6 +346,66 @@ export default function RegisterScreen() {
           </View>
           {confirmPasswordError ? <Text style={styles.errorText}>{confirmPasswordError}</Text> : null}
 
+          <View style={styles.photoSection}>
+            <Text style={styles.inputLabel}>Photo de profil</Text>
+            <View style={styles.photoRow}>
+              <View style={styles.photoPreview}>
+                {photoPreview ? (
+                  <Image source={{ uri: photoPreview }} style={styles.photoImage} />
+                ) : (
+                  <View style={styles.photoPlaceholder}>
+                    <Text style={styles.photoPlaceholderText}>Aucune photo</Text>
+                  </View>
+                )}
+              </View>
+              <TouchableOpacity
+                style={[styles.photoButton, (loading || photoUploading) && styles.buttonDisabled]}
+                disabled={loading || photoUploading}
+                onPress={async () => {
+                  const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                  if (status !== 'granted') {
+                    Alert.alert('Permission requise', 'Autorisez l\'accès à la galerie pour ajouter une photo.');
+                    return;
+                  }
+
+                  const result = await ImagePicker.launchImageLibraryAsync({
+                    mediaTypes: ['images'],
+                    allowsEditing: true,
+                    aspect: [1, 1],
+                    quality: 0.7,
+                    base64: true,
+                  });
+
+                  if (!result.canceled) {
+                    const asset = result.assets[0];
+                    try {
+                      setPhotoUploading(true);
+                      let base64Data = asset.base64;
+                      if (!base64Data) {
+                        base64Data = await FileSystem.readAsStringAsync(asset.uri, { encoding: 'base64' });
+                      }
+                      const mime = asset.mimeType || asset.type || 'image/jpeg';
+                      const dataUrl = `data:${mime};base64,${base64Data}`;
+                      setPhoto(dataUrl);
+                      setPhotoPreview(asset.uri);
+                    } catch (error) {
+                      console.error('Erreur préparation photo:', error);
+                      Alert.alert('Photo', "Impossible de préparer la photo sélectionnée.");
+                    } finally {
+                      setPhotoUploading(false);
+                    }
+                  }
+                }}
+              >
+                <Text style={styles.photoButtonText}>
+                  {photo ? 'Changer la photo' : 'Ajouter une photo'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {photoUploading && <Text style={styles.photoInfo}>Préparation de la photo...</Text>}
+            {!photo && <Text style={styles.photoInfo}>Optionnel mais recommandé pour votre profil.</Text>}
+          </View>
+
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleRegister}
@@ -515,6 +582,58 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  photoSection: {
+    marginTop: 24,
+  },
+  photoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  photoPreview: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    overflow: 'hidden',
+    backgroundColor: '#E6F0FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#B3D4FF',
+  },
+  photoImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  photoPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+  },
+  photoPlaceholderText: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    paddingHorizontal: 12,
+  },
+  photoButton: {
+    flex: 1,
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  photoInfo: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 8,
   },
   buttonText: {
     color: '#fff',

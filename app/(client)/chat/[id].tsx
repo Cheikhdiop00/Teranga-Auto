@@ -9,10 +9,12 @@ import {
   Keyboard,
   Platform,
   SafeAreaView,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Send } from 'lucide-react-native';
+import { ArrowLeft, Send, Play, Pause, Mic, StopCircle } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io, Socket } from 'socket.io-client';
 
@@ -21,6 +23,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useClientTheme } from '@/contexts/ClientThemeContext';
 import type { ClientThemeColors } from '@/contexts/ClientThemeContext';
+import { Audio, AVPlaybackStatus } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
 
 type ChatMessage = {
   id: string;
@@ -29,6 +33,9 @@ type ChatMessage = {
   content: string;
   createdAt: string;
   isOwn: boolean;
+  messageType?: 'text' | 'image' | 'file' | 'audio';
+  fileUrl?: string;
+  audioDurationMs?: number;
 };
 
 export default function ClientChatScreen() {
@@ -48,9 +55,14 @@ export default function ClientChatScreen() {
   const [peerUserId, setPeerUserId] = useState<string | null>(null);
   const [online, setOnline] = useState<boolean | null>(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDurationMs, setRecordingDurationMs] = useState(0);
+  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     loadConversationMeta();
@@ -94,6 +106,9 @@ export default function ClientChatScreen() {
             content: payload.message.content,
             createdAt: payload.message.createdAt,
             isOwn: String(payload.message.sender?._id || payload.message.sender) === String(profile?.id),
+            messageType: payload.message.messageType,
+            fileUrl: payload.message.fileUrl,
+            audioDurationMs: payload.message.audioDurationMs,
           },
         ]);
       });
@@ -130,6 +145,10 @@ export default function ClientChatScreen() {
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
+      }
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
       }
     };
   }, [conversationId, peerUserId, profile?.id]);
@@ -177,6 +196,9 @@ export default function ClientChatScreen() {
         content: message.content,
         createdAt: message.createdAt,
         isOwn: String(message.sender?._id || message.sender) === String(profile?.id),
+        messageType: message.messageType,
+        fileUrl: message.fileUrl,
+        audioDurationMs: message.audioDurationMs,
       }));
       setMessages(history);
     } catch (error) {
@@ -204,7 +226,7 @@ export default function ClientChatScreen() {
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || !socketRef.current) return;
+    if (!text || !socketRef.current || isRecording || isUploadingAudio) return;
 
     socketRef.current.emit('send_message', {
       conversationId,
@@ -221,10 +243,156 @@ export default function ClientChatScreen() {
         content: text,
         createdAt: new Date().toISOString(),
         isOwn: true,
+        messageType: 'text',
       },
     ]);
 
     setInput('');
+  };
+
+  const requestAudioPermissions = async () => {
+    const { status } = await Audio.requestPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission requise', 'Autorisez l’accès au micro pour envoyer un message vocal.');
+      return false;
+    }
+    return true;
+  };
+
+  const clearRecordingTimer = () => {
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+  };
+
+  const handleStartRecording = async () => {
+    if (isRecording || isUploadingAudio) return;
+    if (!(await requestAudioPermissions())) return;
+    try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      recordingRef.current = recording;
+      setRecordingDurationMs(0);
+      setIsRecording(true);
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingDurationMs(prev => prev + 500);
+      }, 500);
+    } catch (error) {
+      console.error('Unable to start recording', error);
+      Alert.alert('Erreur', 'Impossible de démarrer l’enregistrement audio.');
+      setIsRecording(false);
+      clearRecordingTimer();
+    }
+  };
+
+  const handleCancelRecording = async () => {
+    clearRecordingTimer();
+    setIsRecording(false);
+    setRecordingDurationMs(0);
+    if (recordingRef.current) {
+      try {
+        await recordingRef.current.stopAndUnloadAsync();
+      } catch {
+        // ignore
+      }
+      recordingRef.current = null;
+    }
+    try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+    } catch {
+      // noop
+    }
+  };
+
+  const uploadAudioAndSend = async (uri: string, durationMs: number) => {
+    try {
+      if (!socketRef.current || !peerUserId) {
+        Alert.alert('Erreur', 'Conversation indisponible.');
+        return;
+      }
+      setIsUploadingAudio(true);
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+      const payload = {
+        base64: `data:audio/m4a;base64,${base64}`,
+        audioDurationMs: durationMs,
+      };
+      const token = await AsyncStorage.getItem('authToken');
+      const response = await fetch(`${API_URL}/api/upload/audio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => null);
+        throw new Error(err?.message || 'Upload audio échoué');
+      }
+      const data = await response.json();
+      const audioUrl = data.url;
+      const serverDuration = Number(data.audioDurationMs);
+      const finalDuration = Number.isFinite(serverDuration) ? serverDuration : durationMs;
+
+      socketRef.current.emit('send_message', {
+        conversationId,
+        content: '[audio]',
+        recipientId: peerUserId,
+        messageType: 'audio',
+        fileUrl: audioUrl,
+        audioDurationMs: finalDuration,
+      });
+
+      setMessages(prev => [
+        ...prev,
+        {
+          id: String(Date.now()),
+          senderId: String(profile?.id || ''),
+          content: '[audio]',
+          createdAt: new Date().toISOString(),
+          isOwn: true,
+          messageType: 'audio',
+          fileUrl: audioUrl,
+          audioDurationMs: finalDuration,
+        },
+      ]);
+    } catch (error: any) {
+      console.error('Audio upload failed', error);
+      Alert.alert('Erreur', error?.message || 'Impossible d’envoyer le message audio.');
+    } finally {
+      setIsUploadingAudio(false);
+      try {
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      } catch {
+        // noop
+      }
+    }
+  };
+
+  const handleStopRecording = async () => {
+    if (!recordingRef.current) return;
+    clearRecordingTimer();
+    const activeRecording = recordingRef.current;
+    recordingRef.current = null;
+    setIsRecording(false);
+    try {
+      await activeRecording.stopAndUnloadAsync();
+    } catch (error) {
+      console.error('Unable to stop recording', error);
+    }
+    const status = await activeRecording.getStatusAsync();
+    const durationMs = status?.durationMillis ?? recordingDurationMs;
+    if (!durationMs || durationMs < 700) {
+      Alert.alert('Audio trop court', 'Enregistrez au moins une seconde.');
+      return;
+    }
+    const uri = activeRecording.getURI();
+    if (!uri) {
+      Alert.alert('Erreur', 'Impossible de récupérer le fichier audio.');
+      return;
+    }
+    await uploadAudioAndSend(uri, durationMs);
   };
 
   const headerStatus = useMemo(() => {
@@ -233,12 +401,22 @@ export default function ClientChatScreen() {
   }, [online]);
 
   const renderItem = ({ item }: { item: ChatMessage }) => (
-    <View style={[styles.message, item.isOwn ? styles.messageOwn : styles.messageOther]}>
-      <Text style={[styles.messageText, item.isOwn && styles.messageTextOwn]}>{item.content}</Text>
-      <Text style={styles.messageTime}>
-        {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-      </Text>
-    </View>
+    item.messageType === 'audio' && item.fileUrl ? (
+      <AudioMessageBubble
+        uri={item.fileUrl}
+        durationMs={item.audioDurationMs}
+        isOwn={item.isOwn}
+        colors={colors}
+        styles={styles}
+      />
+    ) : (
+      <View style={[styles.message, item.isOwn ? styles.messageOwn : styles.messageOther]}>
+        <Text style={[styles.messageText, item.isOwn && styles.messageTextOwn]}>{item.content}</Text>
+        <Text style={styles.messageTime}>
+          {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </Text>
+      </View>
+    )
   );
 
   return (
@@ -274,32 +452,133 @@ export default function ClientChatScreen() {
           />
         </View>
 
-        <View
-          style={[
-            styles.inputBar,
-            {
-              paddingBottom: insets.bottom,
-            },
-          ]}
-        >
-          <TextInput
-            style={styles.input}
-            placeholder="Votre message"
-            value={input}
-            onChangeText={onChangeText}
-            multiline
-            autoFocus
-            textAlignVertical="top"
-            placeholderTextColor={placeholderColor}
-            returnKeyType="send"
-          />
-          <TouchableOpacity style={styles.sendBtn} onPress={handleSend} disabled={!input.trim()}>
-            <Send color={input.trim() ? sendIconColor : sendIconDisabled} size={18} />
-          </TouchableOpacity>
+        <View style={[styles.inputWrapper, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <View style={styles.inputBar}>
+            <TouchableOpacity
+              style={[styles.micButton, isRecording && styles.micButtonActive]}
+              onPress={isRecording ? handleStopRecording : handleStartRecording}
+              disabled={isUploadingAudio || (!isRecording && !peerUserId)}
+            >
+              {isRecording ? <StopCircle color={colors.surface} size={20} /> : <Mic color={colors.accent} size={20} />}
+            </TouchableOpacity>
+            {isRecording ? (
+              <TouchableOpacity style={styles.recordingIndicator} onPress={handleCancelRecording}>
+                <View style={styles.recordingDot} />
+                <Text style={styles.recordingTime}>{formatDuration(recordingDurationMs)}</Text>
+                <Text style={styles.recordingCancel}>Annuler</Text>
+              </TouchableOpacity>
+            ) : (
+              <TextInput
+                style={styles.input}
+                placeholder="Votre message"
+                value={input}
+                onChangeText={onChangeText}
+                multiline
+                autoFocus
+                textAlignVertical="top"
+                placeholderTextColor={placeholderColor}
+                returnKeyType="send"
+                editable={!isUploadingAudio}
+              />
+            )}
+            <TouchableOpacity
+              style={[styles.sendBtn, (isRecording || isUploadingAudio || !input.trim()) && styles.sendBtnDisabled]}
+              onPress={handleSend}
+              disabled={isRecording || isUploadingAudio || !input.trim()}
+            >
+              {isUploadingAudio ? (
+                <ActivityIndicator size="small" color={colors.accentContrast} />
+              ) : (
+                <Send color={input.trim() ? sendIconColor : sendIconDisabled} size={18} />
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
+}
+
+type AudioMessageBubbleProps = {
+  uri: string;
+  durationMs?: number;
+  isOwn: boolean;
+  colors: ClientThemeColors;
+  styles: ReturnType<typeof createStyles>;
+};
+
+function AudioMessageBubble({ uri, durationMs, isOwn, colors, styles }: AudioMessageBubbleProps) {
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progressMs, setProgressMs] = useState(0);
+  const total = durationMs ?? 0;
+
+  useEffect(() => {
+    return () => {
+      if (sound) sound.unloadAsync().catch(() => undefined);
+    };
+  }, [sound]);
+
+  const onPlaybackStatus = (status: AVPlaybackStatus) => {
+    if (!status.isLoaded) return;
+    setProgressMs(status.positionMillis ?? 0);
+    if (status.didJustFinish) {
+      setIsPlaying(false);
+      setProgressMs(0);
+    }
+  };
+
+  const handleToggle = async () => {
+    try {
+      if (isPlaying) {
+        await sound?.pauseAsync();
+        setIsPlaying(false);
+        return;
+      }
+      if (!sound) {
+        const { sound: newSound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
+        setSound(newSound);
+        newSound.setOnPlaybackStatusUpdate(onPlaybackStatus);
+        setIsPlaying(true);
+      } else {
+        await sound.playAsync();
+        setIsPlaying(true);
+      }
+    } catch (error) {
+      console.error('Unable to play audio message', error);
+    }
+  };
+
+  const progressRatio = total > 0 ? Math.min(progressMs / total, 1) : 0;
+  const progressColor = isOwn ? colors.accentContrast : colors.accent;
+  const bubbleStyles = [styles.message, isOwn ? styles.messageOwn : styles.messageOther];
+
+  return (
+    <View style={[...bubbleStyles, styles.audioBubble]}>
+      <TouchableOpacity style={[styles.audioPlayButton, { backgroundColor: isOwn ? colors.accentContrast : colors.accent }]} onPress={handleToggle}>
+        {isPlaying ? <Pause color={isOwn ? colors.accent : colors.accentContrast} size={18} /> : <Play color={isOwn ? colors.accent : colors.accentContrast} size={18} />}
+      </TouchableOpacity>
+      <View style={styles.audioProgressWrapper}>
+        <View style={[styles.audioProgressTrack, { backgroundColor: isOwn ? '#ffffff55' : '#00000015' }]}
+        >
+          <View style={[styles.audioProgressFill, { flex: progressRatio, backgroundColor: progressColor }]} />
+          <View style={{ flex: 1 - progressRatio }} />
+        </View>
+        <Text style={[styles.messageTime, { marginTop: 6 }]}>
+          {formatDuration(isPlaying ? progressMs : total)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function formatDuration(durationMs: number) {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60)
+    .toString()
+    .padStart(2, '0');
+  const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+  return `${minutes}:${seconds}`;
 }
 
 const createStyles = (colors: ClientThemeColors) =>
@@ -346,15 +625,17 @@ const createStyles = (colors: ClientThemeColors) =>
     messageText: { fontSize: 15, color: colors.textPrimary },
     messageTextOwn: { color: colors.accentContrast },
     messageTime: { fontSize: 10, color: colors.textSecondary, marginTop: 4, textAlign: 'right' },
-    inputBar: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingTop: 8,
+    inputWrapper: {
       paddingHorizontal: 12,
       backgroundColor: colors.surface,
       borderTopWidth: 1,
       borderTopColor: colors.border,
+    },
+    inputBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: 8,
+      paddingTop: 8,
     },
     input: {
       flex: 1,
@@ -381,4 +662,67 @@ const createStyles = (colors: ClientThemeColors) =>
       shadowRadius: 8,
       elevation: 4,
     },
+    sendBtnDisabled: {
+      backgroundColor: colors.cardBorder,
+    },
+    micButton: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surfaceAlt,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    micButtonActive: {
+      backgroundColor: '#DC2626',
+      borderColor: '#DC2626',
+    },
+    recordingIndicator: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: '#FEE2E2',
+      borderRadius: 12,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+    },
+    recordingDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: '#DC2626',
+    },
+    recordingTime: {
+      fontWeight: '600',
+      color: '#991B1B',
+    },
+    recordingCancel: {
+      marginLeft: 'auto',
+      color: '#DC2626',
+      fontWeight: '500',
+      textDecorationLine: 'underline',
+    },
+    audioBubble: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    audioPlayButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    audioProgressWrapper: { flex: 1 },
+    audioProgressTrack: {
+      flexDirection: 'row',
+      height: 4,
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    audioProgressFill: {},
   });

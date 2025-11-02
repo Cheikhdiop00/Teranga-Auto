@@ -4,51 +4,17 @@ import { useRouter } from 'expo-router';
 import { useClientTheme } from '@/contexts/ClientThemeContext';
 import type { ClientThemeColors } from '@/contexts/ClientThemeContext';
 import { LogOut, User, Phone, MapPin, Mail, Edit3, ArrowLeft } from 'lucide-react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useMemo, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '@/config/api';
+import { useMemo, useState, useEffect } from 'react';
 
 export default function ClientProfileScreen() {
-  const { profile, signOut, updateProfile } = useAuth() as any;
+  const { profile, signOut } = useAuth();
   const router = useRouter();
   const { colors } = useClientTheme();
-  const initialPhoto = (profile as any)?.profilePhoto || (profile as any)?.profile_photo;
-  const [photoUri, setPhotoUri] = useState<string | undefined>(initialPhoto);
+  const [photoUri, setPhotoUri] = useState<string | undefined>(profile?.photo_url);
 
-  useFocusEffect(
-    useCallback(() => {
-      let mounted = true;
-      (async () => {
-        try {
-          const token = await AsyncStorage.getItem('authToken');
-          const res = await fetch(`${API_URL}/api/auth/me`, {
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-          });
-          if (!res.ok) return;
-          const user = await res.json();
-          if (!mounted) return;
-          const p = user?.profilePhoto || user?.profile_photo;
-          if (p) setPhotoUri(p);
-          if (typeof updateProfile === 'function') {
-            updateProfile({
-              first_name: user?.firstName ?? profile?.first_name,
-              last_name: user?.lastName ?? profile?.last_name,
-              phone: user?.phoneNumber ?? profile?.phone,
-              address: user?.address ?? profile?.address,
-              profile_photo: p ?? initialPhoto,
-            });
-          }
-        } catch {}
-      })();
-      return () => {
-        mounted = false;
-      };
-    }, [])
-  );
+  useEffect(() => {
+    setPhotoUri(profile?.photo_url);
+  }, [profile?.photo_url]);
 
   const handleSignOut = () => {
     Alert.alert('Déconnexion', 'Voulez-vous vraiment vous déconnecter ?', [

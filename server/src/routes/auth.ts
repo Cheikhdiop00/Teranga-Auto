@@ -1,12 +1,69 @@
-import { Router } from 'express';
+import { Router, Request } from 'express';
 import bcrypt from 'bcryptjs';
+import path from 'path';
+import fs from 'fs/promises';
+import { v4 as uuid } from 'uuid';
+
 import User from '../models/User.js';
+import Mechanic from '../models/Mechanic.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { signToken, verifyToken } from '../utils/jwt.js';
 import { requireAuth } from '../middlewares/auth.js';
 import { sendActivationEmail, sendResetPasswordEmail } from '../utils/email.js';
 
 const router = Router();
+
+const uploadsDir = path.join(process.cwd(), 'uploads');
+
+async function ensureUploadsDir() {
+  await fs.mkdir(uploadsDir, { recursive: true });
+}
+
+function resolveUploadsBaseUrl(req: Request) {
+  const envRaw = process.env.API_PUBLIC_URL || process.env.API_URL || '';
+  const sanitized = envRaw
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/\/?$/, '')
+    .replace(/\/api$/i, '');
+  if (sanitized && !/localhost/i.test(sanitized)) {
+    return sanitized;
+  }
+  const host = req.get('host');
+  if (host) {
+    return `${req.protocol}://${host}`
+      .replace(/\/?$/, '')
+      .replace(/\/api$/i, '');
+  }
+  return 'http://localhost:3000';
+}
+
+async function processProfilePhotoInput(req: Request, raw: unknown): Promise<string | undefined> {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return undefined;
+  }
+
+  const value = raw.trim();
+  if (!value.startsWith('data:')) {
+    return value;
+  }
+
+  const matches = /^data:(?<mime>[^;]+);base64,(?<data>.+)$/i.exec(value);
+  if (!matches?.groups?.data) {
+    throw new Error('Image base64 invalide');
+  }
+
+  await ensureUploadsDir();
+  const buffer = Buffer.from(matches.groups.data, 'base64');
+  const mime = matches.groups.mime;
+  const extension = mime?.split('/')?.[1] || 'jpg';
+  const filename = `${uuid()}.${extension}`;
+  const filePath = path.join(uploadsDir, filename);
+  await fs.writeFile(filePath, buffer);
+
+  const baseUrl = resolveUploadsBaseUrl(req);
+  return `${baseUrl}/uploads/${filename}`;
+}
 
 /**
  * @openapi
@@ -109,7 +166,15 @@ const router = Router();
 router.post(
   '/register',
   asyncHandler(async (req, res) => {
-    const { email, password, firstName, lastName, nationalId, address, profilePhoto } = req.body;
+    const {
+      email,
+      password,
+      firstName,
+      lastName,
+      nationalId,
+      address,
+      profilePhoto: profilePhotoInput,
+    } = req.body;
     // Support both phone and phoneNumber, and normalize role to uppercase
     const phoneNumber = req.body.phoneNumber || req.body.phone;
     const roleRaw = (req.body.role || '').toString();
@@ -131,6 +196,16 @@ router.post(
     };
 
     const specialties = normalizeSpecialties(req.body.specialties || req.body.specialty);
+
+    let profilePhoto: string | undefined;
+    try {
+      profilePhoto = await processProfilePhotoInput(req, profilePhotoInput);
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error?.message || 'Image de profil invalide',
+      });
+    }
 
     console.log('Register payload:', { email, firstName, lastName, phoneNumber, role, address, hasPassword: !!password });
 
@@ -160,7 +235,6 @@ router.post(
       phoneNumber,
       role,
       status: 'active',
-      emailVerified: true,
       profilePhoto,
     });
 
@@ -176,27 +250,41 @@ router.post(
         address,
         specialty: specialties[0],
         specialties,
+        profilePhoto,
       });
     }
 
-    const token = signToken({ id: user._id.toString(), role: user.role });
+    const userId = (user._id as any)?.toString?.() ?? String(user._id ?? '');
+    const token = signToken({ id: userId, role: user.role });
     
     // Ne pas renvoyer le mot de passe dans la réponse
     const userResponse = user.toObject();
-    delete userResponse.password;
+    if ('password' in userResponse) {
+      delete (userResponse as any).password;
+    }
     
     // Récupérer les informations supplémentaires du client ou du mécanicien
-    let additionalInfo = {};
+    let additionalInfo: Record<string, any> = {};
+    let mechanicRecordId: string | undefined;
     if (role === 'CLIENT') {
       const Client = (await import('../models/Client.js')).default;
       const clientInfo = await Client.findOne({ user: user._id });
       if (clientInfo) additionalInfo = clientInfo.toObject();
     } else if (role === 'MECANICIEN') {
-      const Mechanic = (await import('../models/Mechanic.js')).default;
       const mechanicInfo = await Mechanic.findOne({ user: user._id });
-      if (mechanicInfo) additionalInfo = mechanicInfo.toObject();
+      if (mechanicInfo) {
+        const mechanicData = mechanicInfo.toObject();
+        mechanicRecordId = mechanicData._id?.toString();
+        const { _id: _mechanicId, ...rest } = mechanicData;
+        additionalInfo = rest;
+      }
     }
-    
+
+    const missionsCompleted =
+      role === 'MECANICIEN' && 'interventionsCount' in additionalInfo
+        ? (additionalInfo as any).interventionsCount ?? 0
+        : undefined;
+
     res.status(201).json({ 
       success: true,
       message: `Inscription réussie.`,
@@ -204,7 +292,11 @@ router.post(
       user: {
         ...userResponse,
         ...additionalInfo,
-        id: user._id
+        id: userId,
+        mechanic_record_id: mechanicRecordId,
+        ...(missionsCompleted !== undefined
+          ? { missions_completed: missionsCompleted }
+          : {}),
       }
     });
   })
@@ -266,7 +358,7 @@ router.post(
       });
     }
 
-    const token = signToken({ id: user._id.toString(), role: user.role as any });
+    const token = signToken({ id: (user._id as any)?.toString?.() ?? String(user._id ?? ''), role: user.role as any });
     console.log('Login successful for:', user.email);
     res.json({ token, user });
   })
@@ -283,9 +375,30 @@ router.get(
   '/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user!.id);
+    const user = await User.findById(req.user!.id).lean();
     if (!user) return res.status(404).json({ message: 'User not found' });
-    res.json(user);
+
+    res.set('Cache-Control', 'no-store');
+
+    let missionsCompleted = 0;
+    let mechanicRecordId: string | undefined;
+    let mechanicExtra: Record<string, any> = {};
+    if (user.role === 'MECANICIEN') {
+      const mechanic = await Mechanic.findOne({ user: user._id }).lean();
+      missionsCompleted = mechanic?.interventionsCount ?? 0;
+      if (mechanic) {
+        mechanicRecordId = mechanic._id?.toString();
+        const { _id: _mechanicId, user: mechanicUserRef, ...rest } = mechanic;
+        mechanicExtra = rest;
+      }
+    }
+
+    res.json({
+      ...user,
+      missions_completed: missionsCompleted,
+      mechanic_record_id: mechanicRecordId,
+      ...mechanicExtra,
+    });
   })
 );
 
@@ -358,7 +471,7 @@ router.patch(
   '/profile',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { firstName, lastName, email, phoneNumber, profilePhoto } = req.body;
+    const { firstName, lastName, email, phoneNumber, address, profilePhoto: profilePhotoInput } = req.body;
     const userId = req.user!.id;
 
     // Vérifier si email déjà utilisé par un autre
@@ -367,13 +480,43 @@ router.patch(
       if (existing) return res.status(409).json({ message: 'Email déjà utilisé' });
     }
 
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { firstName, lastName, email, phoneNumber, profilePhoto },
-      { new: true }
-    ).select('-password');
+    let profilePhoto: string | undefined;
+    try {
+      profilePhoto = await processProfilePhotoInput(req, profilePhotoInput);
+    } catch (error: any) {
+      return res.status(400).json({ message: error?.message || 'Image de profil invalide' });
+    }
+
+    const userUpdate: Record<string, any> = {};
+    if (typeof firstName === 'string') userUpdate.firstName = firstName;
+    if (typeof lastName === 'string') userUpdate.lastName = lastName;
+    if (typeof email === 'string') userUpdate.email = email;
+    if (typeof phoneNumber === 'string') userUpdate.phoneNumber = phoneNumber;
+    if (typeof address === 'string') userUpdate.address = address;
+    if (typeof profilePhoto === 'string') userUpdate.profilePhoto = profilePhoto;
+
+    const updatedUser = await User.findByIdAndUpdate(userId, userUpdate, { new: true }).select('-password');
 
     if (!updatedUser) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+
+    if (req.user?.role === 'MECANICIEN') {
+      const mechanicUpdate: Record<string, any> = {};
+      if (typeof profilePhoto === 'string') mechanicUpdate.profilePhoto = profilePhoto;
+      if (typeof address === 'string') mechanicUpdate.address = address;
+      if (Object.keys(mechanicUpdate).length > 0) {
+        await Mechanic.findOneAndUpdate(
+          { user: userId },
+          { $set: mechanicUpdate },
+          { new: true, upsert: false },
+        );
+      }
+    } else if (typeof profilePhoto === 'string') {
+      await Mechanic.findOneAndUpdate(
+        { user: userId },
+        { $set: { profilePhoto } },
+        { new: true, upsert: false },
+      );
+    }
 
     res.json({ message: 'Profil mis à jour', user: updatedUser });
   })

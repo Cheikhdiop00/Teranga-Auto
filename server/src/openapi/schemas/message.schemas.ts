@@ -25,7 +25,7 @@
  *           example: "2025-01-01T12:00:00.000Z"
  *         messageType:
  *           type: string
- *           enum: [text, image, file]
+ *           enum: [text, image, file, audio]
  *           example: "text"
  *         fileUrl:
  *           type: string
@@ -33,6 +33,9 @@
  *         fileName:
  *           type: string
  *           example: "document.pdf"
+ *         audioDurationMs:
+ *           type: number
+ *           example: 4200
  *         createdAt:
  *           type: string
  *           format: date-time

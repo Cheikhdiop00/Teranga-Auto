@@ -9,6 +9,7 @@ export interface IUser extends Document {
   email: string;
   password: string;
   phoneNumber?: string;
+  address?: string;
   profilePhoto?: string;
   status?: 'active' | 'inactive' | 'pending';
   role: UserRole;
@@ -24,6 +25,7 @@ const userSchema = new Schema<IUser>(
     email: { type: String, required: true, unique: true, lowercase: true, index: true },
     password: { type: String, required: true, select: false },
     phoneNumber: { type: String },
+    address: { type: String },
     profilePhoto: { type: String },
     status: { type: String, enum: ['active', 'inactive', 'pending'], default: 'active' },
     role: { type: String, enum: ['ADMIN', 'CLIENT', 'MECANICIEN'], required: true },

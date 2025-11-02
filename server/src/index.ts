@@ -18,6 +18,7 @@ import Review from './models/Review.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 const MONGO_URI = process.env.MONGO_URI as string;
+const SHOULD_SEED_DEMO = process.env.SEED_DEMO_DATA === 'true';
 
 // Fonction pour créer l'admin par défaut
 async function seedDefaultAdmin() {
@@ -65,8 +66,12 @@ async function bootstrap() {
     // Créer l'admin par défaut si nécessaire
     await seedDefaultAdmin();
 
-    // Seed de données de démonstration (une seule fois)
-    await seedDemoData();
+    if (SHOULD_SEED_DEMO) {
+      // Seed de données de démonstration (une seule fois)
+      await seedDemoData();
+    } else {
+      console.log('⏭️  SEED_DEMO_DATA activé uniquement lorsqu\'il vaut "true" - aucun seed exécuté');
+    }
 
     const { server } = createApp();
     server.listen(PORT, '0.0.0.0', () => {

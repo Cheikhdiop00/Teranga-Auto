@@ -14,6 +14,7 @@ import { initSocket } from './socket.js';
 
 export function createApp() {
   const app = express();
+  app.set('etag', false);
   app.use(cors({
     origin: function (origin, callback) {
       // Permettre les requêtes sans origin (comme les apps mobiles, Postman, etc.)

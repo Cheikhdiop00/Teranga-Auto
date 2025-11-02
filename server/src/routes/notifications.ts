@@ -75,6 +75,27 @@ router.patch('/:id/read', asyncHandler(notificationController.markAsRead));
 
 /**
  * @openapi
+ * /api/notifications/{id}:
+ *   delete:
+ *     tags: [Notifications]
+ *     summary: Supprimer une notification
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la notification
+ *     responses:
+ *       200:
+ *         description: Notification supprimée
+ *       404:
+ *         description: Notification non trouvée
+ */
+router.delete('/:id', asyncHandler(notificationController.deleteNotification));
+
+/**
+ * @openapi
  * /api/notifications/read-all:
  *   patch:
  *     tags: [Notifications]

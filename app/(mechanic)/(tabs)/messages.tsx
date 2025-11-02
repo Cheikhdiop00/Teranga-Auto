@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, FlatList, TextInput, Image, ImageSourcePropType, ListRenderItem } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, FlatList, TextInput, Image, ListRenderItem } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/config/api';
-import { SwipeableRow } from '../../../components/SwipeableRow';
 import { useAuth } from '@/contexts/AuthContext';
 
 // Types
@@ -18,22 +17,9 @@ type Conversation = {
   avatar: string;
 };
 
-type Message = {
-  id: string;
-  text: string;
-  isMe: boolean;
-  time: string;
-};
-
 type ConversationItemProps = {
   item: Conversation;
   onPress: () => void;
-};
-
-type MessageBubbleProps = {
-  isMe: boolean;
-  message: string;
-  time: string;
 };
 
 // Conversations chargées depuis l'API
@@ -71,19 +57,7 @@ const ConversationItem: React.FC<ConversationItemProps> = ({ item, onPress }) =>
   </TouchableOpacity>
 );
 
-// Composant d'un message
-const MessageBubble: React.FC<MessageBubbleProps> = ({ isMe, message, time }) => (
-  <View style={[styles.messageBubble, isMe ? styles.myMessage : styles.theirMessage]}>
-    <Text style={isMe ? styles.myMessageText : styles.theirMessageText}>
-      {message}
-    </Text>
-    <Text style={styles.messageTime}>{time}</Text>
-  </View>
-);
-
 export default function MechanicMessagesScreen() {
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
-  const [message, setMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -105,7 +79,7 @@ export default function MechanicMessagesScreen() {
     );
   }, [searchQuery, conversations]);
 
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem('authToken');
@@ -119,7 +93,8 @@ export default function MechanicMessagesScreen() {
       if (!res.ok) throw new Error('Failed to load conversations');
       const data = await res.json();
       const convs: Conversation[] = (data.data || []).map((c: any) => {
-        const other = (c.participants || []).find((p: any) => (p._id || p.id) !== c.currentUserId) || c.participants?.[0] || {};
+        const selfId = String(currentUserId ?? c.currentUserId ?? '');
+        const other = (c.participants || []).find((p: any) => String(p._id || p.id) !== selfId) || c.participants?.[0] || {};
         return {
           id: c._id || c.id,
           userName: other.firstName ? `${other.firstName} ${other.lastName || ''}`.trim() : 'Conversation',
@@ -130,142 +105,33 @@ export default function MechanicMessagesScreen() {
         };
       });
       setConversations(convs);
-      // Auto-ouvrir la première conversation si disponible
-      if (convs.length > 0) {
-        setSelectedConversation(convs[0]);
-        await loadMessages(convs[0].id);
-      }
     } catch {
       setConversations([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUserId]);
 
   useEffect(() => {
     loadConversations();
-  }, []);
+  }, [loadConversations]);
 
-  // Chargement des messages de la conversation sélectionnée
-  const [messages, setMessages] = useState<Message[]>([]);
-
-  const loadMessages = async (conversationId: string) => {
-    try {
-      const token = await AsyncStorage.getItem('authToken');
-      const res = await fetch(`${API_URL}/api/messages/conversations/${conversationId}/messages`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      if (!res.ok) throw new Error('Failed to load messages');
-      const data = await res.json();
-      const msgs: Message[] = (data.data || []).map((m: any) => ({
-        id: m._id || m.id,
-        text: m.content || '',
-        isMe: currentUserId ? String(m.sender) === String(currentUserId) : false,
-        time: formatTime(m.createdAt),
-      }));
-      setMessages(msgs);
-    } catch {
-      setMessages([]);
-    }
-  };
-
-  // Recharger les messages quand on sélectionne une conversation depuis la liste
-  useEffect(() => {
-    if (selectedConversation) {
-      loadMessages(selectedConversation.id);
-    }
-  }, [selectedConversation]);
-
-  const handleDeleteMessage = (messageId: string) => {
-    setMessages(prevMessages => prevMessages.filter(msg => msg.id !== messageId));
-  };
-
-  const renderMessageItem: ListRenderItem<Message> = ({ item }) => (
-    <SwipeableRow 
-      onDelete={() => handleDeleteMessage(item.id)}
-      enabled={item.isMe} // Permet le balayage uniquement pour les messages de l'utilisateur
-    >
-      <MessageBubble 
-        isMe={item.isMe} 
-        message={item.text} 
-        time={item.time} 
-      />
-    </SwipeableRow>
+  useFocusEffect(
+    useCallback(() => {
+      loadConversations();
+    }, [loadConversations])
   );
 
   const renderConversationItem: ListRenderItem<Conversation> = ({ item }) => (
     <ConversationItem 
       item={item} 
-      onPress={() => setSelectedConversation(item)} 
+      onPress={() => handleOpenConversation(item)} 
     />
   );
 
-  const handleSendMessage = () => {
-    if (message.trim()) {
-      const newMessage = {
-        id: Date.now().toString(),
-        text: message,
-        isMe: true,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      setMessages([...messages, newMessage]);
-      setMessage('');
-    }
+  const handleOpenConversation = (conversation: Conversation) => {
+    router.push({ pathname: '/(mechanic)/chat/[id]', params: { id: conversation.id } });
   };
-
-  if (selectedConversation) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.chatHeader}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => setSelectedConversation(null)}
-          >
-            <Ionicons name="arrow-back" size={24} color="#0A1F44" />
-          </TouchableOpacity>
-          <Image 
-            source={{ uri: selectedConversation.avatar }} 
-            style={styles.chatAvatar} 
-          />
-          <Text style={styles.chatUserName}>{selectedConversation.userName}</Text>
-        </View>
-
-        <FlatList
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={renderMessageItem}
-          style={styles.messagesContainer}
-          contentContainerStyle={styles.messagesContent}
-          inverted={false}
-        />
-
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.messageInput}
-            placeholder="Tapez votre message..."
-            value={message}
-            onChangeText={setMessage}
-            multiline
-          />
-          <TouchableOpacity 
-            style={styles.sendButton}
-            onPress={handleSendMessage}
-            disabled={!message.trim()}
-          >
-            <Ionicons 
-              name="send" 
-              size={20} 
-              color={message.trim() ? '#0A1F44' : '#999'} 
-            />
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -298,6 +164,16 @@ export default function MechanicMessagesScreen() {
         style={styles.conversationList}
         refreshing={loading}
         onRefresh={loadConversations}
+        ListEmptyComponent={
+          !loading ? (
+            <View style={styles.emptyWrapper}>
+              <Text style={styles.emptyTitle}>Aucune conversation</Text>
+              <Text style={styles.emptySubtitle}>
+                Les messages envoyés ou reçus apparaîtront ici.
+              </Text>
+            </View>
+          ) : null
+        }
       />
     </SafeAreaView>
   );
@@ -428,104 +304,20 @@ const styles = StyleSheet.create({
   },
 
   // Bouton de retour
-  backButton: {
-    marginRight: 12,
-    padding: 4,
-  },
-  // Vue de discussion
-  chatHeader: {
-    flexDirection: 'row',
+  emptyWrapper: {
+    paddingVertical: 48,
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 50,
-    paddingBottom: 15,
-    backgroundColor: '#0A1F44',
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-    marginBottom: 10,
+    gap: 8,
   },
-  chatAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 12,
-    backgroundColor: '#f0f0f0',
-  },
-  chatUserName: {
+  emptyTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFFFFF',
-    flex: 1,
+    color: '#0A1F44',
   },
-  messagesContainer: {
-    flex: 1,
-    paddingHorizontal: 0,
-  },
-  messagesContent: {
-    paddingHorizontal: 16,
-  },
-  messageBubble: {
-    maxWidth: '80%',
-    padding: 12,
-    borderRadius: 16,
-    marginVertical: 4,
-    backgroundColor: '#FFFFFF',
-  },
-  myMessage: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#0A1F44',
-    borderBottomRightRadius: 4,
-    marginRight: 16,
-  },
-  theirMessage: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#F0F0F0',
-    borderBottomLeftRadius: 4,
-    marginLeft: 16,
-  },
-  myMessageText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-  },
-  theirMessageText: {
-    color: '#333333',
-    fontSize: 15,
-  },
-  messageTime: {
-    fontSize: 10,
-    color: '#999',
-    marginTop: 4,
-    textAlign: 'right',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    padding: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  messageInput: {
-    flex: 1,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    maxHeight: 100,
-    marginRight: 8,
-    fontSize: 15,
-  },
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F0F0F0',
-    justifyContent: 'center',
-    alignItems: 'center',
+  emptySubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    paddingHorizontal: 32,
   },
 });

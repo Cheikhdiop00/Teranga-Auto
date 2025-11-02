@@ -1244,7 +1244,9 @@ export default function ClientHomeScreen() {
                     {typeof mechanic.latitude === 'number' && typeof mechanic.longitude === 'number' && (mechanic.latitude !== 0 || mechanic.longitude !== 0) ? (
                       <Text style={styles.mechanicLocation}>Lat. {mechanic.latitude.toFixed(4)} · Lon. {mechanic.longitude.toFixed(4)}</Text>
                     ) : (
-                      <Text style={styles.mechanicLocationPending}>Coordonnées en attente</Text>
+                      <Text style={styles.mechanicLocationPending}>Coordonnées 
+                      
+                      </Text>
                     )}
                   </View>
                   <View style={[styles.statusBadge, mechanic.is_available && styles.statusBadgeAvailable]}>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -46,11 +46,13 @@ import { API_BASE_URL } from '@/config/api';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/config/api';
+import { useClientTheme } from '@/contexts/ClientThemeContext';
 import { io, Socket } from 'socket.io-client';
 
 export default function AdminDashboardScreen() {
   const { profile, loading: authLoading, signOut } = useAuth();
   const router = useRouter();
+  const { colors, isDarkMode, toggleTheme } = useClientTheme();
   const [stats, setStats] = useState({
     totalClients: 0,
     totalMechanics: 0,
@@ -62,7 +64,6 @@ export default function AdminDashboardScreen() {
   const [users, setUsers] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(3); // Exemple: 3 notifications non lues
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
@@ -117,42 +118,28 @@ export default function AdminDashboardScreen() {
     outputRange: [-drawerWidth, 0],
   });
 
-  const theme = isDarkMode
-    ? {
-        // Mode sombre
-        backgroundGradient: ['#1a1a2e', '#16213e'] as const,
-        headerBackground: '#0A1F44',
-        borderColor: '#2C2C2E',
-        textPrimary: '#FFFFFF',
-        textSecondary: '#B0B0B0',
-        cardBackground: '#1F1F1F',
-        menuBackground: '#0A1F44', // Bleu foncé pour le menu en mode sombre
-        menuTextColor: '#FFFFFF',  // Texte blanc pour le menu
-        iconColor: '#FFFFFF',
-        headerTextColor: '#FFFFFF',
-        headerIconColor: '#FFFFFF',
-        gradient: ['#667eea', '#764ba2'] as const,
-        accent: '#FFD700',
-      }
-    : {
-        // Mode clair
-        backgroundGradient: ['#f5f7fa', '#c3cfe2'] as const,
-        headerBackground: '#0A1F44',
-        borderColor: '#E0E0E0',
-        textPrimary: '#000000',
-        textSecondary: '#666666',
-        cardBackground: '#FFFFFF',
-        menuBackground: '#0A1F44', // Bleu foncé pour le menu en mode clair
-        menuTextColor: '#FFFFFF',  // Texte blanc pour le menu
-        iconColor: '#FFFFFF',      // Icônes blanches
-        headerTextColor: '#FFFFFF',
-        headerIconColor: '#FFFFFF',
-        gradient: ['#667eea', '#764ba2'] as const,
-        accent: '#FFD700',
-      };
+  const theme = useMemo(
+    () => ({
+      backgroundGradient: isDarkMode
+        ? ([colors.surface, colors.background] as const)
+        : ([colors.background, colors.surface] as const),
+      header: colors.accent,
+      border: colors.border,
+      textPrimary: colors.textPrimary,
+      textSecondary: colors.textSecondary,
+      cardBackground: colors.surface,
+      menuBackground: colors.surface,
+      menuTextColor: colors.textPrimary,
+      iconColor: colors.accentContrast,
+      title: colors.accentContrast,
+      gradient: [colors.accent, colors.accent] as const,
+      accent: colors.accent,
+    }),
+    [colors, isDarkMode],
+  );
 
   const handleToggleTheme = () => {
-    setIsDarkMode((prev) => !prev);
+    toggleTheme();
     setIsMenuOpen(false);
   };
 
@@ -383,20 +370,21 @@ export default function AdminDashboardScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
-      <SafeAreaView style={styles.container}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+
         {/* Header */}
-        <View style={[styles.header, { backgroundColor: theme.headerBackground, borderBottomColor: theme.borderColor }]}>
+        <View style={[styles.header, { backgroundColor: theme.header, borderBottomColor: theme.border }]}>
           <TouchableOpacity onPress={() => setIsMenuOpen(true)} style={styles.menuButton}>
-            <Menu size={24} color={theme.headerIconColor} />
+            <Menu size={24} color={theme.iconColor} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: theme.headerTextColor }]}>Teranga Auto</Text>
+          <Text style={[styles.headerTitle, { color: theme.title }]}>Teranga Auto</Text>
           <View style={styles.headerIcons}>
             <TouchableOpacity 
               onPress={() => router.push('/(admin)/(tabs)/notifications' as any)}
               style={styles.notificationButton}
             >
-              <Bell size={24} color={theme.headerIconColor} />
+              <Bell size={24} color={theme.iconColor} />
               {unreadNotifications > 0 && (
                 <View style={styles.notificationBadge}>
                   <Text style={styles.notificationText}>
@@ -463,7 +451,7 @@ export default function AdminDashboardScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadStats} />}
       >
         {/* Bandeau Rôle Administrateur */}
-        <View style={[styles.roleBanner, { backgroundColor: theme.cardBackground, borderBottomColor: theme.borderColor }]}>
+        <View style={[styles.roleBanner, { backgroundColor: theme.cardBackground, borderBottomColor: theme.border }]}>
           <View style={styles.roleContent}>
             <Crown size={20} color="#FFD700" style={styles.crownIcon} />
             <Text style={[styles.roleTitle, { color: theme.textPrimary }]}>Administrateur</Text>
@@ -575,7 +563,7 @@ export default function AdminDashboardScreen() {
         
 
         {/* Utilisateurs inscrits */}
-        <View style={[styles.section, { backgroundColor: theme.cardBackground, borderColor: theme.borderColor }]}>
+        <View style={[styles.section, { backgroundColor: theme.cardBackground, borderColor: theme.border }]}>
           <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Utilisateurs récents (3 derniers)</Text>
           {users.length > 0 ? (
             users.map((u: any) => (
@@ -592,7 +580,7 @@ export default function AdminDashboardScreen() {
                   </View>
                 )}
               >
-                <View style={[styles.userRow, { borderBottomColor: theme.borderColor }]}>
+                <View style={[styles.userRow, { borderBottomColor: theme.border }]}> 
                   <TouchableOpacity onPress={() => openEditModal(u)} style={styles.userAvatarMini}>
                     <Text style={styles.userAvatarMiniText}>
                       {(u.firstName || 'U').charAt(0)}{(u.lastName || '').charAt(0)}
@@ -615,11 +603,11 @@ export default function AdminDashboardScreen() {
         </View>
 
         {/* Recent Services */}
-        <View style={[styles.section, { backgroundColor: theme.cardBackground, borderColor: theme.borderColor, marginTop: '1%' }]}>
+        <View style={[styles.section, { backgroundColor: theme.cardBackground, borderColor: theme.border, marginTop: '1%' }]}> 
           <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Services Récents</Text>
           {recentServices.length > 0 ? (
             recentServices.slice(0, 3).map((service: any, index: number) => (
-              <View key={service._id || service.id || index} style={[styles.serviceItem, { borderBottomColor: theme.borderColor }]}> 
+              <View key={service._id || service.id || index} style={[styles.serviceItem, { borderBottomColor: theme.border }]}> 
                 <Text style={[styles.serviceName, { color: theme.textPrimary }]}>{service.name || 'Service'}</Text>
                 <Text style={[styles.serviceDate, { color: theme.textSecondary }]}>{formatDate(service.createdAt || service.created_at)}</Text>
               </View>
@@ -640,7 +628,7 @@ export default function AdminDashboardScreen() {
             <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Modifier l'utilisateur</Text>
 
             <TextInput
-              style={[styles.input, { borderColor: theme.borderColor, color: theme.textPrimary }]}
+              style={[styles.input, { borderColor: theme.border, color: theme.textPrimary }]}
               placeholder="Prénom"
               placeholderTextColor={theme.textSecondary}
               value={editForm.firstName}
@@ -648,7 +636,7 @@ export default function AdminDashboardScreen() {
             />
 
             <TextInput
-              style={[styles.input, { borderColor: theme.borderColor, color: theme.textPrimary }]}
+              style={[styles.input, { borderColor: theme.border, color: theme.textPrimary }]}
               placeholder="Nom"
               placeholderTextColor={theme.textSecondary}
               value={editForm.lastName}
@@ -656,7 +644,7 @@ export default function AdminDashboardScreen() {
             />
 
             <TextInput
-              style={[styles.input, { borderColor: theme.borderColor, color: theme.textPrimary }]}
+              style={[styles.input, { borderColor: theme.border, color: theme.textPrimary }]}
               placeholder="Téléphone"
               placeholderTextColor={theme.textSecondary}
               value={editForm.phoneNumber}
@@ -664,7 +652,7 @@ export default function AdminDashboardScreen() {
             />
 
             <TextInput
-              style={[styles.input, { borderColor: theme.borderColor, color: theme.textPrimary }]}
+              style={[styles.input, { borderColor: theme.border, color: theme.textPrimary }]}
               placeholder="Email"
               placeholderTextColor={theme.textSecondary}
               value={editForm.email}
@@ -672,7 +660,7 @@ export default function AdminDashboardScreen() {
             />
 
             <TextInput
-              style={[styles.input, { borderColor: theme.borderColor, color: theme.textPrimary }]}
+              style={[styles.input, { borderColor: theme.border, color: theme.textPrimary }]}
               placeholder="Rôle (CLIENT, MECANICIEN, ADMIN)"
               placeholderTextColor={theme.textSecondary}
               value={editForm.role}
@@ -682,7 +670,7 @@ export default function AdminDashboardScreen() {
             <View style={styles.modalActions}>
               <TouchableOpacity
                 onPress={() => setModalVisible(false)}
-                style={[styles.cancelButton, { backgroundColor: theme.cardBackground, borderColor: theme.borderColor }]}
+                style={[styles.cancelButton, { backgroundColor: theme.cardBackground, borderColor: theme.border }]}
               >
                 <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>Annuler</Text>
               </TouchableOpacity>

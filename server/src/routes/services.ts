@@ -1,5 +1,7 @@
 import { Router } from 'express';
+import { Types } from 'mongoose';
 import Service from '../models/Service.js';
+import History from '../models/History.js';
 import { buildCrudRouter } from '../utils/crud.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
@@ -53,6 +55,57 @@ router.post(
     const { query } = req.body || {};
     const count = await Service.countDocuments(query || {});
     res.json({ count });
+  })
+);
+
+router.post(
+  '/purge',
+  asyncHandler(async (req, res) => {
+    const {
+      mechanicId,
+      mechanicRecordId,
+      mechanicUserId,
+      mechanicIds = [],
+    } = req.body || {};
+
+    const identifiers = [mechanicId, mechanicRecordId, mechanicUserId, ...mechanicIds]
+      .flat()
+      .filter((value): value is string => typeof value === 'string' && value.toString().trim().length > 0)
+      .map((value) => value.toString().trim());
+
+    if (!identifiers.length) {
+      return res.status(400).json({ message: 'mechanicId or mechanicRecordId is required' });
+    }
+
+    const objectIds = identifiers
+      .filter((value) => Types.ObjectId.isValid(value))
+      .map((value) => new Types.ObjectId(value));
+
+    const filter: any = {
+      $or: [
+        { mechanic_id: { $in: identifiers } },
+        { mechanicId: { $in: identifiers } },
+      ],
+    };
+
+    if (objectIds.length) {
+      filter.$or.push({ mechanic_id: { $in: objectIds } });
+      filter.$or.push({ mechanicId: { $in: objectIds } });
+    }
+
+    const deleteServicesResult = await Service.deleteMany(filter);
+
+    let deletedHistoryCount = 0;
+    if (objectIds.length) {
+      const historyFilter = { mechanic: { $in: objectIds } };
+      const historyResult = await History.deleteMany(historyFilter);
+      deletedHistoryCount = historyResult.deletedCount || 0;
+    }
+
+    res.json({
+      deletedServices: deleteServicesResult.deletedCount || 0,
+      deletedHistories: deletedHistoryCount,
+    });
   })
 );
 

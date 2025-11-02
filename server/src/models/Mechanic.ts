@@ -5,6 +5,7 @@ export interface IMechanic extends Document {
   nationalId?: string; // numero_cin
   specialty?: string;
   specialties?: string[];
+  profilePhoto?: string;
   interventionZone?: string;
   available?: boolean;
   reputation?: number; // 0-5
@@ -23,6 +24,7 @@ const mechanicSchema = new Schema<IMechanic>(
     nationalId: { type: String },
     specialty: { type: String },
     specialties: [{ type: String }],
+    profilePhoto: { type: String },
     interventionZone: { type: String },
     available: { type: Boolean, default: true },
     reputation: { type: Number, min: 0, max: 5, default: 0 },

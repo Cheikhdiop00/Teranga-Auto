@@ -3,8 +3,11 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import Message from '../models/Message.js';
 import Conversation from '../models/Conversation.js';
 
-export const getConversations = asyncHandler(async (req: Request & { user: any }, res: Response) => {
-  const userId = req.user.id;
+export const getConversations = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ success: false, message: 'Utilisateur non authentifié' });
+  }
 
   const conversations = await Conversation.find({
     participants: userId,
@@ -43,9 +46,12 @@ export const getConversations = asyncHandler(async (req: Request & { user: any }
   });
 });
 
-export const getMessages = asyncHandler(async (req: Request & { user: any }, res: Response) => {
+export const getMessages = asyncHandler(async (req: Request, res: Response) => {
   const { conversationId } = req.params;
-  const userId = req.user.id;
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ success: false, message: 'Utilisateur non authentifié' });
+  }
 
   // Vérifier que l'utilisateur fait partie de la conversation
   const conversation = await Conversation.findOne({
@@ -78,9 +84,19 @@ export const getMessages = asyncHandler(async (req: Request & { user: any }, res
   });
 });
 
-export const startConversation = asyncHandler(async (req: Request & { user: any }, res: Response) => {
-  const { participantId, content, messageType = 'text', fileUrl, fileName } = req.body;
-  const userId = req.user.id;
+export const startConversation = asyncHandler(async (req: Request, res: Response) => {
+  const {
+    participantId,
+    content,
+    messageType = 'text',
+    fileUrl,
+    fileName,
+    audioDurationMs,
+  } = req.body;
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ success: false, message: 'Utilisateur non authentifié' });
+  }
 
   if (userId === participantId) {
     return res.status(400).json({
@@ -126,17 +142,31 @@ export const startConversation = asyncHandler(async (req: Request & { user: any 
     }
   }
 
+  const trimmedContent = typeof content === 'string' ? content.trim() : '';
+  const requiresFile = messageType === 'image' || messageType === 'file' || messageType === 'audio';
+  if (requiresFile && !fileUrl) {
+    return res.status(400).json({
+      success: false,
+      message: 'fileUrl est requis pour ce type de message'
+    });
+  }
+
+  if (!conversation) {
+    return res.status(500).json({ success: false, message: 'Conversation introuvable' });
+  }
+
   // Si un message initial est fourni, le créer
   let initialMessage = null;
-  if (content && content.trim()) {
+  if (trimmedContent || requiresFile) {
     const message = new Message({
       conversation: conversation._id,
       sender: userId,
-      content: content.trim(),
+      content: trimmedContent || (messageType === 'audio' ? '[audio]' : ''),
       read: false,
       messageType,
       fileUrl,
-      fileName
+      fileName,
+      audioDurationMs
     });
 
     initialMessage = await message.save();
@@ -173,9 +203,12 @@ export const startConversation = asyncHandler(async (req: Request & { user: any 
   });
 });
 
-export const deleteConversation = asyncHandler(async (req: Request & { user: any }, res: Response) => {
+export const deleteConversation = asyncHandler(async (req: Request, res: Response) => {
   const { conversationId } = req.params;
-  const userId = req.user.id;
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ success: false, message: 'Utilisateur non authentifié' });
+  }
 
   // Vérifier que l'utilisateur fait partie de la conversation
   const conversation = await Conversation.findOne({
@@ -202,8 +235,11 @@ export const deleteConversation = asyncHandler(async (req: Request & { user: any
   });
 });
 
-export const getUnreadCount = asyncHandler(async (req: Request & { user: any }, res: Response) => {
-  const userId = req.user.id;
+export const getUnreadCount = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ success: false, message: 'Utilisateur non authentifié' });
+  }
 
   const totalUnread = await Message.countDocuments({
     conversation: {
