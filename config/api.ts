@@ -13,7 +13,7 @@ const getApiUrl = () => {
   // 2) IP fixe du serveur backend
   // Note: La détection automatique est désactivée car elle peut détecter
   // l'IP du dev server Expo au lieu de l'IP du backend
-  return 'http://192.168.1.27:3000';
+  return 'http://192.168.1.7:3000';
 };
 
 export const API_URL = getApiUrl();

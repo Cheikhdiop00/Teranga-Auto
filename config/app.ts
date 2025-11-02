@@ -4,7 +4,7 @@ export const APP_CONFIG = {
   MODE: 'auto', // Basculera automatiquement selon la disponibilité
 
   // Configuration API - IP de votre serveur backend
-  API_BASE: 'http://192.168.1.27/api', // Votre IP réseau pour le mobile
+  API_BASE: 'http://192.168.1.7/api', // Votre IP réseau pour le mobile
 
   // Configuration des services
   USE_LOCAL_SERVICES: false, // Sera déterminé automatiquement
