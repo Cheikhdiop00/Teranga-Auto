@@ -48,6 +48,45 @@ router.get(
 /**
  * @openapi
  * /api/admin/users/{id}:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Supprimer un utilisateur (Admin)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Utilisateur supprimé
+ *       404:
+ *         description: Utilisateur introuvable
+ */
+router.delete(
+  '/users/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+
+    await Promise.all([
+      Client.deleteMany({ user: id }),
+      Mechanic.deleteMany({ user: id }),
+    ]);
+
+    await user.deleteOne();
+
+    res.json({ success: true, message: 'Utilisateur supprimé' });
+  })
+);
+
+/**
+ * @openapi
+ * /api/admin/users/{id}:
  *   patch:
  *     tags: [Admin]
  *     summary: Modifier un utilisateur (rôle, statut) (Admin)

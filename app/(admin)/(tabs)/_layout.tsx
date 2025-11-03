@@ -1,15 +1,15 @@
 import { Tabs } from 'expo-router';
-import { LayoutDashboard, Users, User, AlertCircle } from 'lucide-react-native';
+import { LayoutDashboard, Users, User, AlertCircle, Bell } from 'lucide-react-native';
 
 export default function AdminTabsLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#0ac778ff',
-        tabBarInactiveTintColor: '#ffffffff',
+        tabBarActiveTintColor: '#FFFFFF',
+        tabBarInactiveTintColor: '#DCEBFF',
         tabBarStyle: {
-          backgroundColor: '#0A1F44',
+          backgroundColor: '#007AFF',
         },
       }}
     >
@@ -43,6 +43,13 @@ export default function AdminTabsLayout() {
         options={{
           title: 'Profil',
           tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          title: 'Notifications',
+          tabBarIcon: ({ color, size }) => <Bell color={color} size={size} />,
         }}
       />
     </Tabs>

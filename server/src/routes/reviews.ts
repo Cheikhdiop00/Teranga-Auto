@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Review from '../models/Review.js';
 import Mechanic from '../models/Mechanic.js';
 import Notification from '../models/Notification.js';
+import User from '../models/User.js';
 import { crudHandlers } from '../utils/crud.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { getIO } from '../socket.js';
@@ -72,6 +73,43 @@ router.post(
           stats: { average, count },
         });
       }
+    }
+
+    try {
+      const admins = await User.find({ role: 'ADMIN' }).select('_id firstName lastName').lean();
+      if (admins.length) {
+        const notificationPayload = {
+          title: 'Avis client enregistré',
+          content: `Note ${rating}/5 pour le mécanicien ${mechanicDoc?.user?.firstName || ''} ${mechanicDoc?.user?.lastName || ''}`.trim(),
+          type: 'review_admin',
+          metadata: {
+            reviewId: review._id,
+            mechanicId,
+            rating,
+            comment,
+          },
+        } as const;
+
+        const createdNotifications = await Promise.all(
+          admins.map((admin) =>
+            Notification.create({
+              user: admin._id,
+              ...notificationPayload,
+            }),
+          ),
+        );
+
+        const io = getIO();
+        if (io) {
+          admins.forEach((admin, index) => {
+            io.to(`user_${admin._id}`).emit('admin_notification', {
+              notification: createdNotifications[index],
+            });
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Unable to notify admins about review', error);
     }
 
     res.status(201).json({
